@@ -2,3 +2,6 @@
 	path = godot-cpp
 	url = git@github.com:godotengine/godot-cpp.git
 	branch = 4.4
+[submodule "MiniBrain"]
+	path = MiniBrain
+	url = git@github.com:DarkAngelZT/MiniBrain.git
