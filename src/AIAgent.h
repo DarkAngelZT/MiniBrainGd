@@ -5,10 +5,18 @@
 namespace godot {
     class AIAgent: public Object
     {
-    private:
+    protected:
         /* data */
     public:
         AIAgent(/* args */);
         ~AIAgent();
+
+        void Init();
+
+        void ProcessSensorData();
+
+        void PushTrainingData();
+
+        void Train();
     };    
 }
