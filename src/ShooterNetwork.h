@@ -8,12 +8,25 @@ namespace godot {
     class ShooterNetwork
     {
     protected:
-        FullyConnected* m_stateFCLayer;
-        std::vector<IComputeNode *> m_layers;
+        std::vector<IComputeNode *> m_stateLayers;
+        std::vector<IComputeNode *> m_envLayers;
+        std::vector<IComputeNode *> m_combinedLayers;
         LossFunc *m_lossFunc=nullptr;
     public:
-        ShooterNetwork(/* args */);
+        ShooterNetwork(
+            int StateDim, 
+            int EnvWidth, int EnvHeight, int EnvChannel,
+            int OutDim,
+            int StateHiddenDim,
+            int EnvHiddenWidth,int EnvHiddenHeight, int EnvHiddenChannel,
+            int CombinedHiddenDim);
         ~ShooterNetwork();
+
+        void Forward();
+
+        void Backward();
+
+        void SetLossFunc(LossFunc *lossFunc);
     };    
     
 }
