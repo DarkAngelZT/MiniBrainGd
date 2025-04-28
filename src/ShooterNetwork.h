@@ -22,11 +22,16 @@ namespace godot {
             int CombinedHiddenDim);
         ~ShooterNetwork();
 
-        void Forward();
+        void Forward(const Matrix& InData);
 
-        void Backward();
+        void Backward(const Matrix& Input, const Matrix& Target);
 
-        void SetLossFunc(LossFunc *lossFunc);
+        void Update(Optimizer& opt);
+
+        void SetLossFunc(LossFunc *lossFunc)
+        {
+            m_lossFunc = lossFunc;
+        }
     };    
     
 }

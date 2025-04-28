@@ -40,4 +40,19 @@ namespace godot {
         
     }
 
+    void ShooterNetwork::Forward(const Matrix& InData)
+    {
+
+    }
+
+    void ShooterNetwork::Backward(const Matrix& Input, const Matrix& Target)
+    {
+
+    }
+
+    void ShooterNetwork::Update(Optimizer& opt)
+    {
+        
+    }
+
 }
