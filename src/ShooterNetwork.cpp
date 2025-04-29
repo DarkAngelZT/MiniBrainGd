@@ -40,7 +40,7 @@ namespace godot {
         
     }
 
-    void ShooterNetwork::Forward(const Matrix& InData)
+    void ShooterNetwork::Forward(const Matrix& InStateData, const Matrix& InEnvData)
     {
 
     }
@@ -53,6 +53,11 @@ namespace godot {
     void ShooterNetwork::Update(Optimizer& opt)
     {
         
+    }
+
+    Matrix ShooterNetwork::Predict(const Matrix& InStateData, const Matrix& InEnvData)
+    {
+
     }
 
 }
