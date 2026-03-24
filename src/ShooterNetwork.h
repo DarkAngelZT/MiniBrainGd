@@ -1,6 +1,6 @@
 #pragma once
 
-#include "..\MiniBrain\Source\MiniBrain.h"
+#include "MiniBrain.h"
 
 using namespace MiniBrain;
 
