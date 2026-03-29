@@ -1,19 +1,20 @@
 #pragma once
 
 #include <godot_cpp/classes/object.hpp>
+#include "ShooterNetwork.h"
 
 namespace godot {
     class AIAgent: public Object
     {
     protected:
-        /* data */
+        ShooterNetwork* network;
     public:
         AIAgent(/* args */);
         ~AIAgent();
 
         void Init();
 
-        void ProcessSensorData();
+        PackedFloat32Array ProcessSensorData(const PackedFloat32Array& data);
 
         void PushTrainingData();
 
