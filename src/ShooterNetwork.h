@@ -5,12 +5,13 @@
 using namespace MiniBrain;
 
 namespace godot {
+    template<typename T>
     class ShooterNetwork
     {
     protected:
-        std::vector<IComputeNode *> m_stateLayers;
-        std::vector<IComputeNode *> m_envLayers;
-        std::vector<IComputeNode *> m_combinedLayers;
+        std::vector<IComputeNode<T> *> m_stateLayers;
+        std::vector<IComputeNode<T> *> m_envLayers;
+        std::vector<IComputeNode<T> *> m_combinedLayers;
         LossFunc *m_lossFunc=nullptr;
     public:
         ShooterNetwork(
@@ -22,13 +23,11 @@ namespace godot {
             int CombinedHiddenDim);
         ~ShooterNetwork();
 
-        void Forward(const Matrix& InStateData, const Matrix& InEnvData);
+        Matrix<T> Forward(const Matrix<T>& InStateData, const Matrix<T>& InEnvData);
 
-        void Backward(const Matrix& Input, const Matrix& Target);
+        void Backward(T& Loss) override;
 
         void Update(Optimizer& opt);
-
-        Matrix Predict(const Matrix& InStateData, const Matrix& InEnvData);
 
         void SetLossFunc(LossFunc *lossFunc)
         {
