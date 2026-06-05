@@ -21,17 +21,23 @@ protected:
     AIAgentMode mode;
 
     //推理模式用这个
-    MiniBrain::Network<MiniBrain::Scalar> *network = nullptr;
+    MiniBrain::Network<MiniBrain::Scalar> *m_preprocessNet = nullptr;
+    MiniBrain::Network<MiniBrain::Scalar> *m_moveNet = nullptr;
+    MiniBrain::Network<MiniBrain::Scalar> *m_shootNet = nullptr;
     //训练模式用这个
-    MiniBrain::Network<MiniBrain::AutoDiffVar> *actor = nullptr;
-    MiniBrain::Network<MiniBrain::AutoDiffVar> *critic = nullptr;
+    MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_preprocessNet = nullptr;
+    MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_moveNet = nullptr;
+    MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_shootNet = nullptr;
+
+    MiniBrain::Network<MiniBrain::AutoDiffVar> *m_criticNet = nullptr;
+    
     MiniBrain::MatrixX<MiniBrain::AutoDiffVar> *m_training_input = nullptr;
     MiniBrain::MatrixX<MiniBrain::AutoDiffVar> *m_training_target = nullptr;
 public:
     AIAgent(AIAgentMode mode);
     ~AIAgent();
 
-    void Init();
+    void Init(int input_dim, int hidden_dim, int output_dim);
 
     AIAgentMode get_mode() const;
 
