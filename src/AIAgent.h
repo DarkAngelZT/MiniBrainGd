@@ -37,7 +37,10 @@ public:
     AIAgent(AIAgentMode mode);
     ~AIAgent();
 
-    void Init(int input_dim, int hidden_dim, int output_dim);
+    void Init(
+        int input_dim, int output_dim, 
+        int entity_feature_dim, int embedding_dim=16, int attention_key_dim=16, int gru_hidden_dim = 128,
+        int out_hidden_dim = 128);
 
     AIAgentMode get_mode() const;
 

@@ -47,10 +47,41 @@ AIAgentMode AIAgent::get_mode() const {
     return mode;
 }
 
-void AIAgent::Init() 
+void AIAgent::Init(
+    int input_dim, int output_dim,
+     int entity_feature_dim, int embedding_dim, 
+     int attention_key_dim, int gru_hidden_dim, 
+     int out_hidden_dim) 
 {
-    // Placeholder initialization. Real network setup can be done later.
-    UtilityFunctions::print("AIAgent: Init called");
+   if (mode == AIAgentMode::Inference) {
+        // 构建推理网络
+        m_preprocessNet = new MiniBrain::Network<MiniBrain::Scalar>();
+        m_moveNet = new MiniBrain::Network<MiniBrain::Scalar>();
+        m_shootNet = new MiniBrain::Network<MiniBrain::Scalar>();
+
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(input_dim, embedding_dim));
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::Scalar>>());
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::AttentionLayer<MiniBrain::Scalar>>(embedding_dim, attention_key_dim));
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePoolingLayer<MiniBrain::Scalar>>(embedding_dim, entity_feature_dim));
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::GRULayer<MiniBrain::Scalar>>(embedding_dim, gru_hidden_dim));
+
+        m_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(gru_hidden_dim, out_hidden_dim));
+        m_moveNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::Scalar>>());
+        m_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(out_hidden_dim, output_dim));
+
+        m_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(gru_hidden_dim, out_hidden_dim));
+        m_shootNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::Scalar>>());
+        m_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(out_hidden_dim, output_dim));
+    } else {
+        // 构建训练网络
+        m_actor_preprocessNet = new MiniBrain::Network<MiniBrain::AutoDiffVar>();
+        m_actor_moveNet = new MiniBrain::Network<MiniBrain::AutoDiffVar>();
+        m_actor_shootNet = new MiniBrain::Network<MiniBrain::AutoDiffVar>();
+
+        m_criticNet = new MiniBrain::Network<MiniBrain::AutoDiffVar>();
+
+        // 这里可以添加具体的网络层构建逻辑，例如全连接层、注意力机制等
+     }   
 }
 
 PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input) 
