@@ -19,15 +19,19 @@ class AIAgent: public Object {
 protected:
     static void _bind_methods();
     AIAgentMode mode;
+    int m_insize,m_outSize;
 
     //推理模式用这个
     MiniBrain::Network<MiniBrain::Scalar> *m_preprocessNet = nullptr;
     MiniBrain::Network<MiniBrain::Scalar> *m_moveNet = nullptr;
     MiniBrain::Network<MiniBrain::Scalar> *m_shootNet = nullptr;
+
+    MiniBrain::Network<MiniBrain::Scalar>* m_GRULayer = nullptr;
     //训练模式用这个
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_preprocessNet = nullptr;
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_moveNet = nullptr;
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_shootNet = nullptr;
+    MiniBrain::Network<MiniBrain::Scalar>* m_actor_GRULayer = nullptr;
 
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_criticNet = nullptr;
     
