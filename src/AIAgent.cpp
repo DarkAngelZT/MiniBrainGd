@@ -205,8 +205,22 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     auto processedData = m_actor_preprocessNet->Forward(input_matrix);
     auto moveData = m_actor_moveNet->Forward(processedData);
     auto shootData = m_actor_shootNet->Forward(processedData);
+    MiniBrain::Matrix<MiniBrain::AutoDiffVar> combinedOutput(m_outSize, batch_size);
+    combinedOutput.topRows(moveData.rows()) = moveData;
+    combinedOutput.bottomRows(shootData.rows()) = shootData;
+    godot::Array output_array;
+    output_array.resize(batch_size);
+    for (int i = 0; i < batch_size; ++i) {
+        godot::PackedFloat32Array sample_output;
+        sample_output.resize(m_outSize);
+        for (int out = 0; out < m_outSize; out++)
+        {
+            sample_output[out] = combinedOutput(out, i).expr->val;
+        }
+        output_array[i] = sample_output;
+    }
 
-    return godot::Array();
+    return output_array;
 }
 
 void AIAgent::PushTrainingData(const godot::Array& batch_inputs, const godot::Array& batch_targets) 
