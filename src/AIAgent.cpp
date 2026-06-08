@@ -119,8 +119,8 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
 {
     godot::PackedFloat32Array output_array;
 
-    if (!network || input.size() == 0) {
-        if (!network) godot::UtilityFunctions::push_error("Agent: Network is not set!");
+    if (!m_preprocessNet || !m_moveNet || !m_shootNet || input.size() == 0) {
+        godot::UtilityFunctions::push_error("Agent: Network is not set!");
         return output_array;
     }
 
@@ -135,19 +135,83 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
     MiniBrain::Matrix<Scalar> moveData = m_moveNet->Forward(processedData);
     MiniBrain::Matrix<Scalar> shootData = m_shootNet->Forward(processedData);
 
-    const int output_size = moveData.rows() + shootData.rows();
+    Scalar horizon = 0;
+    Scalar vertical = 0;
+    const int move_rows = moveData.rows();
+    if (move_rows >= 3) {
+        int max_index = 0;
+        Scalar max_value = moveData(0, 0);
+        for (int r = 1; r < 3; ++r) {
+            if (moveData(r, 0) > max_value) {
+                max_value = moveData(r, 0);
+                max_index = r;
+            }
+        }
+        horizon = max_index;
+    }
+    if (move_rows >= 6) {
+        int max_index = move_rows - 3;
+        Scalar max_value = moveData(max_index, 0);
+        for (int r = move_rows - 2; r < move_rows; ++r) {
+            if (moveData(r, 0) > max_value) {
+                max_value = moveData(r, 0);
+                max_index = r;
+            }
+        }
+        vertical = max_index - 3;
+    }
+
+    Scalar shootAngle = std::tanh(shootData(0, 0))*180;
+    Scalar shootProb = 1.0f / (1.0f + exp(-shootData(2, 0)));
+    Scalar shootAction = shootProb > 0.5 ? 1.0 : 0.0;
+
+    const int output_size = 4;
     output_array.resize(output_size);
     MiniBrain::Matrix<Scalar> combinedOutput(output_size, 1);
-    combinedOutput << moveData, shootData;
+    combinedOutput << horizon, vertical, shootAngle, shootAction;
 
     std::copy(combinedOutput.data(), combinedOutput.data() + output_size, output_array.ptrw());
 
     return output_array;
 }
 
+godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_data)
+{
+    if (!m_actor_preprocessNet || !m_actor_moveNet || !m_actor_shootNet) {
+        godot::UtilityFunctions::push_error("Agent: Network is not set!");
+        return;
+    }
+
+    if (batch_data.size() == 0 ) {
+        godot::UtilityFunctions::push_error("Agent: Batch input or target array is empty!");
+        return;
+    }
+
+    const int batch_size = batch_inputs.size();
+    MiniBrain::MatrixX<MiniBrain::AutoDiffVar> input_matrix(m_insize, batch_size);
+    for (int i = 0; i < batch_size; ++i) {
+        godot::PackedFloat32Array sample = batch_inputs[i];
+        
+        if (sample.size() != m_insize) {
+            godot::UtilityFunctions::push_error("Agent: Input sample " + godot::String::num(i) + " size mismatch!");
+            return;
+        }        
+
+        for (int in = 0; in < m_insize; in++)
+        {
+            input_matrix(in, i) = sample[in];
+        }
+    }
+    auto processedData = m_actor_preprocessNet->Forward(input_matrix);
+    auto moveData = m_actor_moveNet->Forward(processedData);
+    auto shootData = m_actor_shootNet->Forward(processedData);
+
+    return godot::Array();
+}
+
 void AIAgent::PushTrainingData(const godot::Array& batch_inputs, const godot::Array& batch_targets) 
 {
-    if (!network) {
+    if (!m_actor_preprocessNet || !m_actor_moveNet || !m_actor_shootNet || !m_criticNet) {
         godot::UtilityFunctions::push_error("Agent: Network is not set!");
         return;
     }
@@ -158,27 +222,27 @@ void AIAgent::PushTrainingData(const godot::Array& batch_inputs, const godot::Ar
     }
 
     const int batch_size = batch_inputs.size();
-    MiniBrain::MatrixX<MiniBrain::AutoDiffVar> input_matrix(input_dim, batch_size);
+    MiniBrain::MatrixX<MiniBrain::AutoDiffVar> input_matrix(m_insize, batch_size);
 
     for (int i = 0; i < batch_size; ++i) {
         godot::PackedFloat32Array sample = batch_inputs[i];
         
-        if (sample.size() != input_dim) {
+        if (sample.size() != m_insize) {
             godot::UtilityFunctions::push_error("Agent: Input sample " + godot::String::num(i) + " size mismatch!");
             return;
         }        
 
         godot::PackedFloat32Array target = batch_targets[i];
         
-        if (target.size() != output_dim) {
+        if (target.size() != m_outSize) {
             godot::UtilityFunctions::push_error("Agent: Target sample " + godot::String::num(i) + " size mismatch!");
             return;
         }
 
-        std::copy(sample.ptr(), sample.ptr() + input_dim, 
+        std::copy(sample.ptr(), sample.ptr() + m_insize, 
                         input_matrix.col(i).data());
 
-        std::copy(target.ptr(), target.ptr() + output_dim, 
+        std::copy(target.ptr(), target.ptr() + m_outSize, 
                   target_matrix.col(i).data());
     }
 }

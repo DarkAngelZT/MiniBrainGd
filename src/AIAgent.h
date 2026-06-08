@@ -49,6 +49,7 @@ public:
     AIAgentMode get_mode() const;
 
     PackedFloat32Array ProcessSensorData(const PackedFloat32Array &data);
+    godot::Array BatchProcessSensorData(const godot::Array &batch_data);
 
     void PushTrainingData(const godot::Array& batch_inputs, const godot::Array& batch_targets);
 
