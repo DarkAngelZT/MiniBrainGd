@@ -13,6 +13,25 @@ namespace godot {
         INFERENCE
     };
 
+    struct TrainingData {
+        MiniBrain::Matrix<MiniBrain::Scalar> state;
+        MiniBrain::Matrix<MiniBrain::Scalar> actions;
+        MiniBrain::Matrix<MiniBrain::Scalar> rewards;
+        MiniBrain::Matrix<MiniBrain::Scalar> done;
+
+        MiniBrain::MatrixX<MiniBrain::Scalar> old_log_probs;
+        MiniBrain::MatrixX<MiniBrain::Scalar> old_critic_values;
+
+        void Clear() {
+            state.setZero();
+            actions.setZero();
+            rewards.setZero();
+            done.setZero();
+            old_log_probs.setZero();
+            old_critic_values.setZero();
+        }
+    };
+
 class AIAgent: public Object {
     GDCLASS(AIAgent, Object);
 
@@ -35,8 +54,7 @@ protected:
 
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_criticNet = nullptr;
     
-    MiniBrain::MatrixX<MiniBrain::AutoDiffVar> *m_training_input = nullptr;
-    MiniBrain::MatrixX<MiniBrain::AutoDiffVar> *m_training_target = nullptr;
+    std::shared_ptr<TrainingData> m_training_data;
 public:
     AIAgent(AIAgentMode mode);
     ~AIAgent();
