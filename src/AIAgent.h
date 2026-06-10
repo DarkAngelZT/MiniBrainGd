@@ -19,8 +19,14 @@ namespace godot {
         MiniBrain::Matrix<MiniBrain::Scalar> rewards;
         MiniBrain::Matrix<MiniBrain::Scalar> done;
 
-        MiniBrain::MatrixX<MiniBrain::Scalar> old_log_probs;
-        MiniBrain::MatrixX<MiniBrain::Scalar> old_critic_values;
+        MiniBrain::Matrix<MiniBrain::Scalar> old_log_probs;
+        MiniBrain::Matrix<MiniBrain::Scalar> old_critic_values;
+
+        std::unordered_map<int, int> agent_write_index; // agent_id -> current write index
+        int batch_size = 0;
+
+        MiniBrain::Matrix<MiniBrain::Scalar> input_buffer;
+        std::unordered_map<int, int> input_mapping; // agent_id -> buffer column index        
 
         void Clear() {
             state.setZero();
@@ -29,6 +35,10 @@ namespace godot {
             done.setZero();
             old_log_probs.setZero();
             old_critic_values.setZero();
+
+            input_buffer.setZero();
+            agent_write_index.clear();
+            input_mapping.clear();
         }
     };
 
@@ -67,9 +77,9 @@ public:
     AIAgentMode get_mode() const;
 
     PackedFloat32Array ProcessSensorData(const PackedFloat32Array &data);
-    godot::Array BatchProcessSensorData(const godot::Array &batch_data);
+    godot::Array BatchProcessSensorData(const godot::Array &batch_data, const godot::Array &agent_ids);
 
-    void PushTrainingData(const godot::Array& batch_inputs, const godot::Array& batch_targets);
+    void PushTrainingData(const godot::Array& batch_rewards, const godot::Array& agent_ids, const godot::Array& batch_dones);
 
     void Train(int step);
 };

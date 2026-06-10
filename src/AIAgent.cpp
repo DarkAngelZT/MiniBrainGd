@@ -167,7 +167,7 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
     return output_array;
 }
 
-godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_data)
+godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_data, const godot::Array &agent_ids))
 {
     if (!m_actor_preprocessNet || !m_actor_moveNet || !m_actor_shootNet) {
         godot::UtilityFunctions::push_error("Agent: Network is not set!");
@@ -219,19 +219,19 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     return batch_array;
 }
 
-void AIAgent::PushTrainingData(const godot::Array& batch_inputs, const godot::Array& batch_targets) 
+void AIAgent::PushTrainingData(const godot::Array& batch_rewards, const godot::Array& agent_ids, const godot::Array& batch_dones) 
 {
     if (!m_actor_preprocessNet || !m_actor_moveNet || !m_actor_shootNet || !m_criticNet) {
         godot::UtilityFunctions::push_error("Agent: Network is not set!");
         return;
     }
 
-    if (batch_inputs.size() == 0 || batch_targets.size() == 0) {
-        godot::UtilityFunctions::push_error("Agent: Batch input or target array is empty!");
+    if (batch_rewards.size() == 0 || agent_ids.size() == 0 || batch_dones.size() == 0) {
+        godot::UtilityFunctions::push_error("Agent: One or more training data arrays are empty!");
         return;
     }
 
-    const int batch_size = batch_inputs.size();
+    const int batch_size = batch_rewards.size();
     MiniBrain::MatrixX<MiniBrain::AutoDiffVar> input_matrix(m_insize, batch_size);
 
     for (int i = 0; i < batch_size; ++i) {
