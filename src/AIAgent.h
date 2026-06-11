@@ -40,6 +40,18 @@ namespace godot {
             agent_write_index.clear();
             input_mapping.clear();
         }
+
+        void Init(int batch_size, int state_dim, int action_dim) {
+            this->batch_size = batch_size;
+            state.resize(state_dim, batch_size);
+            actions.resize(action_dim, batch_size);
+            rewards.resize(1, batch_size);
+            done.resize(1, batch_size);
+            old_log_probs.resize(1, batch_size);
+            old_critic_values.resize(1, batch_size);
+
+            input_buffer.resize(state_dim, batch_size);
+        }
     };
 
 class AIAgent: public Object {

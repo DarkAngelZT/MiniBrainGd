@@ -167,7 +167,7 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
     return output_array;
 }
 
-godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_data, const godot::Array &agent_ids))
+godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_data, const godot::Array &agent_ids)
 {
     if (!m_actor_preprocessNet || !m_actor_moveNet || !m_actor_shootNet) {
         godot::UtilityFunctions::push_error("Agent: Network is not set!");
