@@ -198,18 +198,26 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     auto moveData = m_actor_moveNet->Forward(processedData);
     auto shootData = m_actor_shootNet->Forward(processedData);
     
-    Matrix<MiniBrain::AutoDiffVar> combinedOutput(m_outSize, batch_size);
+    Matrix<MiniBrain::Scalar> combinedOutput(m_outSize, batch_size);
     combinedOutput.topRows(moveData.rows()) = moveData;
     combinedOutput.bottomRows(shootData.rows()) = shootData;
+
+    const int output_size = 4;
+    combinedOutput.row(2) = shootData.row(0).array().tanh() * 180.0f;
+    auto shootProb = 1.0f / (1.0f + (-shootData.row(2).array()).exp());
+    combinedOutput.row(3) = (shootProb > 0.5f).select(
+        MiniBrain::Matrix<Scalar>::Ones(1, batch_size), 
+        MiniBrain::Matrix<Scalar>::Zero(1, batch_size)
+    );
 
     godot::Array batch_array;
 
     batch_array.resize(batch_size);
     for (int i = 0; i < batch_size; ++i) {
         godot::PackedFloat32Array output_array;
-        output_array.resize(m_outSize);
+        output_array.resize(output_size);
         float* write_ptr = output_array.ptrw();
-        for (int out = 0; out < m_outSize; out++)
+        for (int out = 0; out < output_size; out++)
         {
             write_ptr[out] = combinedOutput(out, i).expr.val;
         }
