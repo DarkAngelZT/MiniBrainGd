@@ -24,6 +24,7 @@ namespace godot {
 
         std::unordered_map<int, int> agent_write_index; // agent_id -> current write index
         int batch_size = 0;
+        int num_frames = 1;
 
         MiniBrain::Matrix<MiniBrain::Scalar> input_buffer;
         std::unordered_map<int, int> input_mapping; // agent_id -> buffer column index        
@@ -41,16 +42,17 @@ namespace godot {
             input_mapping.clear();
         }
 
-        void Init(int batch_size, int state_dim, int action_dim) {
-            this->batch_size = batch_size;
-            state.resize(state_dim, batch_size);
-            actions.resize(action_dim, batch_size);
-            rewards.resize(1, batch_size);
-            done.resize(1, batch_size);
-            old_log_probs.resize(1, batch_size);
-            old_critic_values.resize(1, batch_size);
+        void Init(int inBatch_size, int inNum_frames, int state_dim, int action_dim) {
+            this->batch_size = inBatch_size;
+            this->num_frames = inNum_frames;
+            state.resize(state_dim, inBatch_size*num_frames);
+            actions.resize(action_dim, inBatch_size*num_frames);
+            rewards.resize(1, inBatch_size*num_frames);
+            done.resize(1, inBatch_size*num_frames);
+            old_log_probs.resize(1, inBatch_size*num_frames);
+            old_critic_values.resize(1, inBatch_size*num_frames);
 
-            input_buffer.resize(state_dim, batch_size);
+            input_buffer.resize(state_dim, inBatch_size);
         }
     };
 
@@ -94,6 +96,8 @@ public:
     void PushTrainingData(const godot::Array& batch_rewards, const godot::Array& agent_ids, const godot::Array& batch_dones);
 
     void Train(int step);
+
+    void SetBatchInfo(int batch_size, int num_frames=1);
 };
 
 } // namespace godot

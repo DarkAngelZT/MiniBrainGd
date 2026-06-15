@@ -6,11 +6,13 @@ using namespace godot;
 
 void AIAgent::_bind_methods() 
 {
-    ClassDB::bind_method(D_METHOD("Init"), &AIAgent::Init);
+    ClassDB::bind_method(D_METHOD("Init", "input_dim", "output_dim", "entity_feature_dim", "embedding_dim", "attention_key_dim", "gru_hidden_dim", "out_hidden_dim"), &AIAgent::Init, DEFVAL(16), DEFVAL(16), DEFVAL(128), DEFVAL(128));
     ClassDB::bind_method(D_METHOD("get_mode"), &AIAgent::get_mode);
     ClassDB::bind_method(D_METHOD("ProcessSensorData", "data"), &AIAgent::ProcessSensorData);
-    ClassDB::bind_method(D_METHOD("PushTrainingData", "batch_inputs", "batch_targets"), &AIAgent::PushTrainingData);
+    ClassDB::bind_method(D_METHOD("BatchProcessSensorData", "batch_data", "agent_ids"), &AIAgent::BatchProcessSensorData);
+    ClassDB::bind_method(D_METHOD("PushTrainingData", "batch_rewards", "agent_ids", "batch_dones"), &AIAgent::PushTrainingData);
     ClassDB::bind_method(D_METHOD("Train", "step"), &AIAgent::Train);
+    ClassDB::bind_method(D_METHOD("SetBatchSize", "batch_size"), &AIAgent::SetBatchSize);
 
     BIND_ENUM_CONSTANT(TRAINING);
     BIND_ENUM_CONSTANT(INFERENCE);
@@ -127,12 +129,12 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
     MiniBrain::Matrix<Scalar> moveData = m_moveNet->Forward(processedData);
     MiniBrain::Matrix<Scalar> shootData = m_shootNet->Forward(processedData);
 
-    Scalar horizon = 0;
-    Scalar vertical = 0;
+    MiniBrain::Scalar horizon = 0;
+    MiniBrain::Scalar vertical = 0;
     const int move_rows = moveData.rows();
     if (move_rows >= 3) {
         int max_index = 0;
-        Scalar max_value = moveData(0, 0);
+        MiniBrain::Scalar max_value = moveData(0, 0);
         for (int r = 1; r < 3; ++r) {
             if (moveData(r, 0) > max_value) {
                 max_value = moveData(r, 0);
@@ -143,7 +145,7 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
     }
     if (move_rows >= 6) {
         int max_index = move_rows - 3;
-        Scalar max_value = moveData(max_index, 0);
+        MiniBrain::Scalar max_value = moveData(max_index, 0);
         for (int r = move_rows - 2; r < move_rows; ++r) {
             if (moveData(r, 0) > max_value) {
                 max_value = moveData(r, 0);
@@ -153,9 +155,9 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
         vertical = max_index - 3;
     }
 
-    Scalar shootAngle = std::tanh(shootData(0, 0))*180;
-    Scalar shootProb = 1.0f / (1.0f + exp(-shootData(2, 0)));
-    Scalar shootAction = shootProb > 0.5 ? 1.0 : 0.0;
+    MiniBrain::Scalar shootAngle = std::tanh(shootData(0, 0))*180;
+    MiniBrain::Scalar shootProb = 1.0f / (1.0f + exp(-shootData(2, 0)));
+    MiniBrain::Scalar shootAction = shootProb > 0.5 ? 1.0 : 0.0;
 
     const int output_size = 4;
     output_array.resize(output_size);
@@ -197,31 +199,65 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     auto processedData = m_actor_preprocessNet->Forward(input_matrix);
     auto moveData = m_actor_moveNet->Forward(processedData);
     auto shootData = m_actor_shootNet->Forward(processedData);
-    
-    Matrix<MiniBrain::Scalar> combinedOutput(m_outSize, batch_size);
-    combinedOutput.topRows(moveData.rows()) = moveData;
-    combinedOutput.bottomRows(shootData.rows()) = shootData;
 
-    const int output_size = 4;
-    combinedOutput.row(2) = shootData.row(0).array().tanh() * 180.0f;
-    auto shootProb = 1.0f / (1.0f + (-shootData.row(2).array()).exp());
-    combinedOutput.row(3) = (shootProb > 0.5f).select(
-        MiniBrain::Matrix<Scalar>::Ones(1, batch_size), 
-        MiniBrain::Matrix<Scalar>::Zero(1, batch_size)
-    );
+    static std::mt19937 gen(std::random_device{}());
 
     godot::Array batch_array;
-
     batch_array.resize(batch_size);
-    for (int i = 0; i < batch_size; ++i) {
+
+    for (int col = 0; col < batch_size; ++col) 
+    {
+        MiniBrain::Scalar horizon = 0;
+        MiniBrain::Scalar vertical = 0;
         godot::PackedFloat32Array output_array;
         output_array.resize(output_size);
-        float* write_ptr = output_array.ptrw();
-        for (int out = 0; out < output_size; out++)
+
+        if (move_rows >= 3) 
         {
-            write_ptr[out] = combinedOutput(out, i).expr.val;
+            MiniBrain::Scalar w0 = moveData(0, col).expr->val;
+            MiniBrain::Scalar w1 = moveData(1, col).expr->val;
+            MiniBrain::Scalar w2 = moveData(2, col).expr->val;
+
+            // 如果权重是网络原始输出，需通过 Softmax 或 Exp 确保为正数
+            w0 = std::exp(w0); w1 = std::exp(w1); w2 = std::exp(w2); 
+
+            std::discrete_distribution<> dist_horiz({w0, w1, w2});
+            horizon = dist_horiz(gen); // 随机生成 0, 1, 2
         }
-        batch_array[i] = output_array;
+
+        if (move_rows >= 6) 
+        {
+            MiniBrain::Scalar w0 = moveData(3, col).expr->val;
+            MiniBrain::Scalar w1 = moveData(4, col).expr->val;
+            MiniBrain::Scalar w2 = moveData(5, col).expr->val;
+
+            w0 = std::exp(w0); w1 = std::exp(w1); w2 = std::exp(w2);
+
+            std::discrete_distribution<> dist_vert({w0, w1, w2});
+            vertical = dist_vert(gen); // 随机生成 0, 1, 2
+        }
+
+        MiniBrain::Scalar mean = shootData(0, col).expr->val; // 直接使用网络输出作为均值
+        MiniBrain::Scalar var  = shootData(1, col).expr->val;
+        
+        // 确保方差为正数（网络输出可能为负），取绝对值并加上微小值防止为0
+        MiniBrain::Scalar std_dev = std::sqrt(std::abs(var) + 1e-6); 
+
+        std::normal_distribution<MiniBrain::Scalar> dist_angle(mean, std_dev);
+        MiniBrain::Scalar shootAngle = dist_angle(gen);
+        shootAngle = std::tanh(shootAngle)*180;
+
+        // --- 4. 处理射击动作 (第 2 行，原概率逻辑不变) ---
+        MiniBrain::Scalar shoot_logits = shootData(2, col).expr->val;
+        MiniBrain::Scalar shootProb = 1.0f / (1.0f + std::exp(-shoot_logits));
+        MiniBrain::Scalar shootAction = shootProb > 0.5 ? 1.0 : 0.0;
+
+        output_array[0] = horizon;
+        output_array[1] = vertical;
+        output_array[2] = shootAngle;
+        output_array[3] = shootAction;
+
+        batch_array[col] = output_array;
     }
 
     return batch_array;
@@ -268,8 +304,26 @@ void AIAgent::PushTrainingData(const godot::Array& batch_rewards, const godot::A
 void AIAgent::Train(int step) 
 {
     UtilityFunctions::print("AIAgent: Train called");
-    for (int i = 0; i < step; ++i) {
-        // Placeholder training loop. Real training logic can be implemented later.
-        UtilityFunctions::print("Training step: " + godot::String::num(i + 1));
+    for (int epoch = 0; epoch < step; ++epoch) 
+    {
+        for (int f = 0; f < m_training_data->num_frames; f++)
+        {
+            /* code */
+        }
+        
     }
+}
+
+void godot::AIAgent::SetBatchInfo(int batch_size, int num_frames)
+{
+    if(mode == AIAgentMode::Training)
+    {
+        m_actor_GRLayer->SetBatchSize(batch_size);
+        m_training_data->Init(batch_size, m_insize, m_outSize);
+    }
+    else
+    {
+        m_GRULayer->SetBatchSize(batch_size);
+    }
+
 }
