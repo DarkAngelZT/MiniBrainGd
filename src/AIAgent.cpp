@@ -303,12 +303,18 @@ void AIAgent::PushTrainingData(const godot::Array& batch_rewards, const godot::A
 
 void AIAgent::Train(int step) 
 {
-    UtilityFunctions::print("AIAgent: Train called");
     for (int epoch = 0; epoch < step; ++epoch) 
     {
         for (int f = 0; f < m_training_data->num_frames; f++)
         {
-            /* code */
+            MiniBrain::Matrix<MiniBrain::Scalar> batch_states = m_training_data->state.block(
+                0, f * m_training_data->batch_size, m_training_data->state.rows(), m_training_data->batch_size);
+            MiniBrain::Matrix<MiniBrain::Scalar> batch_actions = m_training_data->actions.block(
+                0, f * m_training_data->batch_size, m_training_data->actions.rows(),m_training_data->batch_size);
+            MiniBrain::Matrix<MiniBrain::Scalar> batch_rewards = m_training_data->rewards.block(
+                0, f * m_training_data->batch_size, m_training_data->rewards.rows(), m_training_data->batch_size);
+            MiniBrain::Matrix<MiniBrain::Scalar> batch_dones = m_training_data->done.block(
+                0, f * m_training_data->batch_size, m_training_data->done.rows(), m_training_data->batch_size);
         }
         
     }
