@@ -19,14 +19,14 @@ namespace godot {
         MiniBrain::Matrix<MiniBrain::Scalar> rewards;
         MiniBrain::Matrix<MiniBrain::Scalar> done;
 
-        MiniBrain::Matrix<MiniBrain::Scalar> old_log_probs;
         MiniBrain::Matrix<MiniBrain::Scalar> old_critic_values;
 
         std::unordered_map<int, int> agent_write_index; // agent_id -> current write index
         int batch_size = 0;
         int num_frames = 1;
 
-        MiniBrain::Matrix<MiniBrain::Scalar> input_buffer;
+        MiniBrain::Matrix<MiniBrain::Scalar> buffer_input;
+        MiniBrain::Matrix<MiniBrain::Scalar> buffer_action;
         std::unordered_map<int, int> input_mapping; // agent_id -> buffer column index        
 
         void Clear() {
@@ -34,10 +34,10 @@ namespace godot {
             actions.setZero();
             rewards.setZero();
             done.setZero();
-            old_log_probs.setZero();
             old_critic_values.setZero();
 
-            input_buffer.setZero();
+            buffer_input.setZero();
+            buffer_action.setZero();
             agent_write_index.clear();
             input_mapping.clear();
         }
@@ -49,10 +49,10 @@ namespace godot {
             actions.resize(action_dim, inBatch_size*num_frames);
             rewards.resize(1, inBatch_size*num_frames);
             done.resize(1, inBatch_size*num_frames);
-            old_log_probs.resize(1, inBatch_size*num_frames);
             old_critic_values.resize(1, inBatch_size*num_frames);
 
-            input_buffer.resize(state_dim, inBatch_size);
+            buffer_input.resize(state_dim, inBatch_size);
+            buffer_action.resize(action_dim, inBatch_size);
         }
     };
 

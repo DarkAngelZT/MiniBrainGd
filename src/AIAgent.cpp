@@ -183,6 +183,9 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
 
     const int batch_size = batch_inputs.size();
     MiniBrain::MatrixX<MiniBrain::AutoDiffVar> input_matrix(m_insize, batch_size);
+    m_training_data->buffer_input.setZero();
+    m_training_data>buffer_action.setZero();
+    m_training_data->input_mapping.clear();
     for (int i = 0; i < batch_size; ++i) {
         godot::PackedFloat32Array sample = batch_inputs[i];
         
@@ -194,7 +197,9 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
         for (int in = 0; in < m_insize; in++)
         {
             input_matrix(in, i) = sample[in];
+            m_training_data->buffer_input(in, i) = sample[in];
         }
+        m_training_data->input_mapping[agent_ids[i]] = i;
     }
     auto processedData = m_actor_preprocessNet->Forward(input_matrix);
     auto moveData = m_actor_moveNet->Forward(processedData);
@@ -205,12 +210,15 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     godot::Array batch_array;
     batch_array.resize(batch_size);
 
+    const int output_size= 4;
+
     for (int col = 0; col < batch_size; ++col) 
     {
         MiniBrain::Scalar horizon = 0;
         MiniBrain::Scalar vertical = 0;
         godot::PackedFloat32Array output_array;
         output_array.resize(output_size);
+        MiniBrain::Vector<MiniBrain::Scalar> action(output_size);
 
         if (move_rows >= 3) 
         {
@@ -245,12 +253,21 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
 
         std::normal_distribution<MiniBrain::Scalar> dist_angle(mean, std_dev);
         MiniBrain::Scalar shootAngle = dist_angle(gen);
+
+        action(2) = shootAngle;
+
         shootAngle = std::tanh(shootAngle)*180;
 
         // --- 4. 处理射击动作 (第 2 行，原概率逻辑不变) ---
         MiniBrain::Scalar shoot_logits = shootData(2, col).expr->val;
         MiniBrain::Scalar shootProb = 1.0f / (1.0f + std::exp(-shoot_logits));
         MiniBrain::Scalar shootAction = shootProb > 0.5 ? 1.0 : 0.0;
+
+        action(0) = horizon;
+        action(1) = vertical;
+        action(3) = shoot_logits;
+
+        m_training_data->buffer_action.col(col) = action;
 
         output_array[0] = horizon;
         output_array[1] = vertical;
@@ -325,7 +342,7 @@ void godot::AIAgent::SetBatchInfo(int batch_size, int num_frames)
     if(mode == AIAgentMode::Training)
     {
         m_actor_GRLayer->SetBatchSize(batch_size);
-        m_training_data->Init(batch_size, m_insize, m_outSize);
+        m_training_data->Init(batch_size, num_frames, m_insize, m_outSize);
     }
     else
     {
