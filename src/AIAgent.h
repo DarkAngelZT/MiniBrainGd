@@ -19,11 +19,13 @@ namespace godot {
         MiniBrain::Matrix<MiniBrain::Scalar> rewards;
         MiniBrain::Matrix<MiniBrain::Scalar> done;
 
+        MiniBrain::Matrix<MiniBrain::Scalar> old_log_probs;
         MiniBrain::Matrix<MiniBrain::Scalar> old_critic_values;
 
         std::unordered_map<int, int> agent_write_index; // agent_id -> current write index
         int batch_size = 0;
         int num_frames = 1;
+        int action_dim = 0;
 
         MiniBrain::Matrix<MiniBrain::Scalar> buffer_input;
         MiniBrain::Matrix<MiniBrain::Scalar> buffer_action;
@@ -34,6 +36,7 @@ namespace godot {
             actions.setZero();
             rewards.setZero();
             done.setZero();
+            old_log_probs.setZero();
             old_critic_values.setZero();
 
             buffer_input.setZero();
@@ -45,11 +48,13 @@ namespace godot {
         void Init(int inBatch_size, int inNum_frames, int state_dim, int action_dim) {
             this->batch_size = inBatch_size;
             this->num_frames = inNum_frames;
+            this->action_dim = action_dim;
             state.resize(state_dim, inBatch_size*num_frames);
             actions.resize(action_dim, inBatch_size*num_frames);
             rewards.resize(1, inBatch_size*num_frames);
             done.resize(1, inBatch_size*num_frames);
             old_critic_values.resize(1, inBatch_size*num_frames);
+            old_log_probs.resize(1, inBatch_size*num_frames);
 
             buffer_input.resize(state_dim, inBatch_size);
             buffer_action.resize(action_dim, inBatch_size);
@@ -79,6 +84,12 @@ protected:
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_criticNet = nullptr;
     
     std::shared_ptr<TrainingData> m_training_data;
+
+    void CalculateLogProbs(
+        const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &action_new, 
+        const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &moveData, 
+        const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &shootData,
+        MiniBrain::Matrix<MiniBrain::AutoDiffVar> &log_probs);
 public:
     AIAgent(AIAgentMode mode);
     ~AIAgent();
@@ -91,13 +102,13 @@ public:
     AIAgentMode get_mode() const;
 
     PackedFloat32Array ProcessSensorData(const PackedFloat32Array &data);
-    godot::Array BatchProcessSensorData(const godot::Array &batch_data, const godot::Array &agent_ids);
+    godot::Array BatchProcessSensorData(const godot::Array &batch_data, const godot::PackedInt32Array &agent_ids);
 
-    void PushTrainingData(const godot::Array& batch_rewards, const godot::Array& agent_ids, const godot::Array& batch_dones);
+    void PushTrainingData(const godot::PackedFloat32Array& batch_rewards, const godot::PackedInt32Array &agent_ids, const godot::PackedFloat32Array &batch_dones);
 
     void Train(int step);
 
-    void SetBatchInfo(int batch_size, int num_frames=1);
+    void SetBatchInfo(int batch_size, int action_dim, int num_frames=1);
 };
 
 } // namespace godot

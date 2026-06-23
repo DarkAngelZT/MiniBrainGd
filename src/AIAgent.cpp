@@ -18,7 +18,70 @@ void AIAgent::_bind_methods()
     BIND_ENUM_CONSTANT(INFERENCE);
 }
 
-AIAgent::AIAgent(AIAgentMode mode) : mode(mode) 
+void godot::AIAgent::CalculateLogProbs(
+    const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &action_new,
+     const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &moveData,
+     const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &shootData,
+     MiniBrain::Matrix<MiniBrain::AutoDiffVar> &log_probs)
+{
+    int batch_size = action_new.cols();
+    log_probs.resize(1, batch_size);
+    for (int i = 0; i < batch_size; i++) {
+        MiniBrain::AutoDiffVar log_p_horizon = 0.0;
+        MiniBrain::AutoDiffVar log_p_vertical = 0.0;
+        MiniBrain::AutoDiffVar log_p_angle = 0.0;
+
+        MiniBrain::Scalar act_horiz = action_new(i, 0).expr->val;
+        MiniBrain::Scalar act_vert  = action_new(i, 1).expr->val;
+        MiniBrain::Scalar act_angle = action_new(i, 2).expr->val;
+
+        // --- 1. 计算水平移动的 Log Prob (Categorical Softmax LogProb) ---
+        if (move_rows >= 3) {
+            MiniBrain::AutoDiffVar v0 = moveData(0, col);
+            MiniBrain::AutoDiffVar v1 = moveData(1, col);
+            MiniBrain::AutoDiffVar v2 = moveData(2, col);
+
+            // 稳定的 Log-Sum-Exp 或者是标准的 Softmax Log 形式
+            MiniBrain::AutoDiffVar max_v = std::max({v0.expr->val, v1.expr->val, v2.expr->val}); // 提升数值稳定性
+            MiniBrain::AutoDiffVar log_z = max_v + std::log(std::exp(v0 - max_v) + std::exp(v1 - max_v) + std::exp(v2 - max_v));
+            
+            // 根据实际选中的动作提取对应的对数概率： log(matrix(act, col)) - log_z
+            if (act_horiz == 0) log_p_horizon = v0 - log_z;
+            else if (act_horiz == 1) log_p_horizon = v1 - log_z;
+            else log_p_horizon = v2 - log_z;
+        }
+
+        // --- 2. 计算垂直移动的 Log Prob ---
+        if (move_rows >= 6) {
+            MiniBrain::AutoDiffVar v3 = moveData(3, col);
+            MiniBrain::AutoDiffVar v4 = moveData(4, col);
+            MiniBrain::AutoDiffVar v5 = moveData(5, col);
+            
+            MiniBrain::AutoDiffVar max_v = std::max({v3.expr->val, v4.expr->val, v5.expr->val});
+            MiniBrain::AutoDiffVar log_z = max_v + std::log(std::exp(v3 - max_v) + std::exp(v4 - max_v) + std::exp(v5 - max_v));
+            
+            if (act_vert == 0) log_p_vertical = v3 - log_z;
+            else if (act_vert == 1) log_p_vertical = v4 - log_z;
+            else log_p_vertical = v5 - log_z;
+        }
+
+        // --- 3. 计算高斯分布射击角度的 Log Prob (Gaussian LogProb) ---
+        MiniBrain::AutoDiffVar mean = shootData(0, col);
+        MiniBrain::AutoDiffVar var  = shootData(1, col);
+        // 确保方差严格大于 0（可以使用 softplus 或者 abs + epsilon）
+        MiniBrain::AutoDiffVar std_dev_sq = std::abs(var) + 1e-6; 
+
+        // 高斯分布对数概率公式： -0.5 * ln(2 * pi * sigma^2) - (x - mu)^2 / (2 * sigma^2)
+        const double PI = 3.141592653589793;
+        log_p_angle = -0.5 * std::log(2.0 * PI * std_dev_sq) - std::pow(act_angle - mean, 2) / (2.0 * std_dev_sq);
+
+        // --- 4. 对应 PyTorch 中的 .sum(1) 操作 ---
+        // 独立动作的对数概率直接相加
+        log_probs(0, col) = log_p_horizon + log_p_vertical + log_p_angle;
+    }
+}
+
+AIAgent::AIAgent(AIAgentMode mode) : mode(mode)
 {
 }
 
@@ -169,7 +232,7 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
     return output_array;
 }
 
-godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_data, const godot::Array &agent_ids)
+godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_data, const godot::PackedInt32Array &agent_ids)
 {
     if (!m_actor_preprocessNet || !m_actor_moveNet || !m_actor_shootNet) {
         godot::UtilityFunctions::push_error("Agent: Network is not set!");
@@ -280,7 +343,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     return batch_array;
 }
 
-void AIAgent::PushTrainingData(const godot::Array& batch_rewards, const godot::Array& agent_ids, const godot::Array& batch_dones) 
+void AIAgent::PushTrainingData(const godot::PackedFloat32Array& batch_rewards, const godot::PackedInt32Array &agent_ids, const godot::PackedFloat32Array &batch_dones) 
 {
     if (!m_actor_preprocessNet || !m_actor_moveNet || !m_actor_shootNet || !m_criticNet) {
         godot::UtilityFunctions::push_error("Agent: Network is not set!");
@@ -293,28 +356,19 @@ void AIAgent::PushTrainingData(const godot::Array& batch_rewards, const godot::A
     }
 
     const int batch_size = batch_rewards.size();
-    MiniBrain::MatrixX<MiniBrain::AutoDiffVar> input_matrix(m_insize, batch_size);
 
     for (int i = 0; i < batch_size; ++i) {
-        godot::PackedFloat32Array sample = batch_inputs[i];
-        
-        if (sample.size() != m_insize) {
-            godot::UtilityFunctions::push_error("Agent: Input sample " + godot::String::num(i) + " size mismatch!");
-            return;
-        }        
+        float rewards = batch_rewards[i];  
+        float done = batch_dones[i];
+        int id = agent_ids[i];
+        int index = m_training_data->agent_write_index[id];
+        int buffer_index = m_training_data->input_mapping[id];
+        m_training_data->agent_write_index[id] += batch_size; // Increment the write index for this agent
 
-        godot::PackedFloat32Array target = batch_targets[i];
-        
-        if (target.size() != m_outSize) {
-            godot::UtilityFunctions::push_error("Agent: Target sample " + godot::String::num(i) + " size mismatch!");
-            return;
-        }
-
-        std::copy(sample.ptr(), sample.ptr() + m_insize, 
-                        input_matrix.col(i).data());
-
-        std::copy(target.ptr(), target.ptr() + m_outSize, 
-                  target_matrix.col(i).data());
+        m_training_data->state.col(index) = m_training_data->buffer_input.col(buffer_index);
+        m_training_data->actions.col(index) = m_training_data->buffer_action.col(buffer_index);
+        m_training_data->rewards(0, index) = rewards;
+        m_training_data->done(0, index) = done;
     }
 }
 
@@ -324,6 +378,7 @@ void AIAgent::Train(int step)
     {
         for (int f = 0; f < m_training_data->num_frames; f++)
         {
+            //顺序跑每一帧
             MiniBrain::Matrix<MiniBrain::Scalar> batch_states = m_training_data->state.block(
                 0, f * m_training_data->batch_size, m_training_data->state.rows(), m_training_data->batch_size);
             MiniBrain::Matrix<MiniBrain::Scalar> batch_actions = m_training_data->actions.block(
@@ -332,17 +387,21 @@ void AIAgent::Train(int step)
                 0, f * m_training_data->batch_size, m_training_data->rewards.rows(), m_training_data->batch_size);
             MiniBrain::Matrix<MiniBrain::Scalar> batch_dones = m_training_data->done.block(
                 0, f * m_training_data->batch_size, m_training_data->done.rows(), m_training_data->batch_size);
+
+            MiniBrain::Matrix<MiniBrain::AutoDiffVar> input_matrix = batch_states.cast<MiniBrain::AutoDiffVar>();
+            MiniBrain::Matrix<MiniBrain::AutoDiffVar> action_new = batch_actions.cast<MiniBrain::AutoDiffVar>();
         }
-        
+        //计算PPO
+        //更新
     }
 }
 
-void godot::AIAgent::SetBatchInfo(int batch_size, int num_frames)
+void godot::AIAgent::SetBatchInfo(int batch_size, int action_dim, int num_frames)
 {
     if(mode == AIAgentMode::Training)
     {
         m_actor_GRLayer->SetBatchSize(batch_size);
-        m_training_data->Init(batch_size, num_frames, m_insize, m_outSize);
+        m_training_data->Init(batch_size, num_frames, m_insize, action_dim);
     }
     else
     {
