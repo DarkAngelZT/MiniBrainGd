@@ -29,6 +29,7 @@ namespace godot {
 
         MiniBrain::Matrix<MiniBrain::Scalar> buffer_input;
         MiniBrain::Matrix<MiniBrain::Scalar> buffer_action;
+        MiniBrain::Matrix<MiniBrain::Scalar> buffer_log_probs;
         std::unordered_map<int, int> input_mapping; // agent_id -> buffer column index        
 
         void Clear() {
@@ -41,6 +42,7 @@ namespace godot {
 
             buffer_input.setZero();
             buffer_action.setZero();
+            buffer_log_probs.setZero();
             agent_write_index.clear();
             input_mapping.clear();
         }
@@ -58,6 +60,7 @@ namespace godot {
 
             buffer_input.resize(state_dim, inBatch_size);
             buffer_action.resize(action_dim, inBatch_size);
+            buffer_log_probs.resize(1, inBatch_size);
         }
     };
 
@@ -85,8 +88,13 @@ protected:
     
     std::shared_ptr<TrainingData> m_training_data;
 
+    float m_gamma = 0.93f;
+    float m_lambda = 0.9f;
+    float m_clip_epsilon = 0.2f;
+    float m_continuous_gamma = 0.9f;
+
     void CalculateLogProbs(
-        const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &action_new, 
+        const MiniBrain::Matrix<MiniBrain::Scalar> &action_new, 
         const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &moveData, 
         const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &shootData,
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> &log_probs);
@@ -109,6 +117,8 @@ public:
     void Train(int step);
 
     void SetBatchInfo(int batch_size, int action_dim, int num_frames=1);
+
+    void SetLearningParameters(float gamma=0.93f, float lambda=0.9f, float clip_epsilon=0.2f, float continuous_gamma=0.9f);
 };
 
 } // namespace godot
