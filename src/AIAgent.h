@@ -13,7 +13,7 @@
 
 namespace godot {
 
-    enum class AIAgentMode {
+    enum AIAgentMode {
         TRAINING,
         INFERENCE
     };
@@ -92,7 +92,7 @@ protected:
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_preprocessNet = nullptr;
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_moveNet = nullptr;
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_shootNet = nullptr;
-    MiniBrain::GRU<MiniBrain::Scalar>* m_actor_GRULayer = nullptr;
+    MiniBrain::GRU<MiniBrain::AutoDiffVar>* m_actor_GRULayer = nullptr;
 
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_criticNet = nullptr;
     
@@ -140,3 +140,5 @@ public:
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::AIAgentMode)

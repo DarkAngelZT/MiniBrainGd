@@ -64,4 +64,7 @@ namespace MiniBrain
     {
         return "EmbeddingLayer";
     }
+
+    template class EmbeddingLayer<Scalar>;
+    template class EmbeddingLayer<AutoDiffVar>;
 }

@@ -13,8 +13,9 @@ using namespace godot;
 
 void AIAgent::_bind_methods() 
 {
-    ClassDB::bind_method(D_METHOD("Init", "input_dim", "output_dim", "entity_feature_dim", "embedding_dim", "attention_key_dim", "gru_hidden_dim", "out_hidden_dim"), &AIAgent::Init, DEFVAL(16), DEFVAL(16), DEFVAL(128), DEFVAL(128));
+    ClassDB::bind_method(D_METHOD("Init", "input_dim", "move_dim", "shoot_dim", "entity_feature_dim", "embedding_dim", "attention_key_dim", "gru_hidden_dim", "out_hidden_dim"), &AIAgent::Init, DEFVAL(16), DEFVAL(16), DEFVAL(128), DEFVAL(128));
     ClassDB::bind_method(D_METHOD("get_mode"), &AIAgent::get_mode);
+    ClassDB::bind_method(D_METHOD("set_mode", "mode"), &AIAgent::set_mode);
     ClassDB::bind_method(D_METHOD("ProcessSensorData", "data"), &AIAgent::ProcessSensorData);
     ClassDB::bind_method(D_METHOD("BatchProcessSensorData", "batch_data", "agent_ids"), &AIAgent::BatchProcessSensorData);
     ClassDB::bind_method(D_METHOD("PushTrainingData", "batch_rewards", "agent_ids", "batch_dones"), &AIAgent::PushTrainingData);
@@ -22,8 +23,8 @@ void AIAgent::_bind_methods()
     ClassDB::bind_method(D_METHOD("SetBatchInfo", "batch_size", "action_dim", "num_frames"), &AIAgent::SetBatchInfo, DEFVAL(1));
     ClassDB::bind_method(D_METHOD("SetLearningParameters", "gamma", "lambda", "clip_epsilon", "continuous_gamma"), &AIAgent::SetLearningParameters, DEFVAL(0.93f), DEFVAL(0.9f), DEFVAL(0.2f), DEFVAL(0.9f));
 
-    BIND_ENUM_CONSTANT(AIAgentMode::TRAINING);
-    BIND_ENUM_CONSTANT(AIAgentMode::INFERENCE);
+    BIND_ENUM_CONSTANT(TRAINING);
+    BIND_ENUM_CONSTANT(INFERENCE);
 }
 
 void godot::AIAgent::CalculateLogProbs(
@@ -173,7 +174,7 @@ void AIAgent::Init(
         m_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePooling<MiniBrain::Scalar>>(n_entities * embedding_dim, embedding_dim));
         auto gru_layer = std::make_unique<MiniBrain::GRU<MiniBrain::Scalar>>(embedding_dim, gru_hidden_dim);
         m_GRULayer = gru_layer.get();
-        m_preprocessNet->AddLayer(gru_layer);
+        m_preprocessNet->AddLayer(std::move(gru_layer));
 
         m_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::Scalar>>(gru_hidden_dim, out_hidden_dim));
         m_moveNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::Scalar>>());
@@ -202,7 +203,7 @@ void AIAgent::Init(
         m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePooling<MiniBrain::AutoDiffVar>>(n_entities * embedding_dim, embedding_dim));
         auto gru_layer_train = std::make_unique<MiniBrain::GRU<MiniBrain::AutoDiffVar>>(embedding_dim, gru_hidden_dim);
         m_actor_GRULayer = gru_layer_train.get();
-        m_actor_preprocessNet->AddLayer(gru_layer_train);
+        m_actor_preprocessNet->AddLayer(std::move(gru_layer_train));
 
         m_actor_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(gru_hidden_dim, out_hidden_dim));
         m_actor_moveNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::AutoDiffVar>>());
