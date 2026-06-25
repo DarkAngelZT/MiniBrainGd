@@ -16,10 +16,10 @@ namespace MiniBrain
     template<typename T>
     void EmbeddingLayer<T>::Init()
     {
-        m_weight.resize(this->m_in_feature_dim,this->m_out_feature_dim);
-        m_bias.resize(this->m_out_feature_dim);
-        m_dw.resize(this->m_in_feature_dim,this->m_out_feature_dim);
-        m_db.resize(this->m_out_feature_dim);
+        this->m_weight.resize(this->m_in_feature_dim,this->m_out_feature_dim);
+        this->m_bias.resize(this->m_out_feature_dim);
+        this->m_dw.resize(this->m_in_feature_dim,this->m_out_feature_dim);
+        this->m_db.resize(this->m_out_feature_dim);
     }
 
     template<typename T>
@@ -32,13 +32,13 @@ namespace MiniBrain
         {
             for (int i = 0; i < nobs; ++i)
             {
-                Matrix<T> X_obs(m_in_feature_dim, m_seqLen);
-                for (int s = 0; s < m_seqLen; ++s) {
+                Matrix<T> X_obs(m_in_feature_dim, m_n_entities);
+                for (int s = 0; s < m_n_entities; ++s) {
                     X_obs.col(s) = InData.block(s * m_in_feature_dim, i, m_in_feature_dim, 1);
                 }
                 Matrix<T> embedded = this->m_weight.transpose() * X_obs;
                 embedded.colwise() += this->m_bias;
-                for (int s = 0; s < m_seqLen; ++s) 
+                for (int s = 0; s < m_n_entities; ++s) 
                 {
                     out.block(s * m_out_feature_dim, i, m_out_feature_dim, 1) = embedded.col(s);
                 }

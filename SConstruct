@@ -8,8 +8,17 @@ import sys
 # This lets SCons know that we're using godot-cpp, from the godot-cpp folder.
 env = SConscript("godot-cpp/SConstruct")
 
-# Configures the 'src' directory as a source for header files.
-env.Append(CPPPATH=["src/"])
+# Configure include search paths to match VS Code's c_cpp_properties.json, using relative workspace paths.
+# LLVM include paths are not needed here, only project headers.
+env.Append(CPPPATH=[
+    "src",
+    "MiniBrain/Source",
+    "MiniBrain/Source/ThirdParty",
+    "godot-cpp/include",
+    "godot-cpp/gen/include",
+    "godot-cpp/include/godot_cpp/core",
+    ".",
+])
 
 # Collects all .cpp files in the 'src' folder as compile targets.
 sources = Glob("src/*.cpp")

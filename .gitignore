@@ -32,3 +32,10 @@
 *.app
 
 .venv
+
+# SCons build artifacts
+.sconsign.dblite
+.sconsign
+.scons_cache/
+bin/
+godot-cpp/bin/

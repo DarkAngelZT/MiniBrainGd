@@ -1,6 +1,13 @@
 #include "AIAgent.h"
+#include "EmbeddingLayer.h"
+#include "StatePooling.h"
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/core/utility_functions.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <random>
+#include <vector>
 
 using namespace godot;
 
@@ -15,8 +22,8 @@ void AIAgent::_bind_methods()
     ClassDB::bind_method(D_METHOD("SetBatchInfo", "batch_size", "action_dim", "num_frames"), &AIAgent::SetBatchInfo, DEFVAL(1));
     ClassDB::bind_method(D_METHOD("SetLearningParameters", "gamma", "lambda", "clip_epsilon", "continuous_gamma"), &AIAgent::SetLearningParameters, DEFVAL(0.93f), DEFVAL(0.9f), DEFVAL(0.2f), DEFVAL(0.9f));
 
-    BIND_ENUM_CONSTANT(TRAINING);
-    BIND_ENUM_CONSTANT(INFERENCE);
+    BIND_ENUM_CONSTANT(AIAgentMode::TRAINING);
+    BIND_ENUM_CONSTANT(AIAgentMode::INFERENCE);
 }
 
 void godot::AIAgent::CalculateLogProbs(
@@ -73,8 +80,8 @@ void godot::AIAgent::CalculateLogProbs(
         }
 
         // --- 3. 计算高斯分布射击角度的 Log Prob (Gaussian LogProb) ---
-        MiniBrain::AutoDiffVar mean = shootData(0, col);
-        MiniBrain::AutoDiffVar var  = shootData(1, col);
+        MiniBrain::AutoDiffVar mean = shootData(0, i);
+        MiniBrain::AutoDiffVar var  = shootData(1, i);
         // 确保方差严格大于 0（可以使用 softplus 或者 abs + epsilon）
         MiniBrain::AutoDiffVar std_dev_sq = abs(var) + 1e-6; 
 
@@ -103,13 +110,18 @@ void godot::AIAgent::ComputeAdvantage(const MiniBrain::Matrix<MiniBrain::Scalar>
     outAdvantage = advMatrix;
 }
 
+AIAgent::AIAgent() : mode(AIAgentMode::INFERENCE)
+{
+    // 默认构造函数，mode默认为INFERENCE
+}
+
 AIAgent::AIAgent(AIAgentMode mode) : mode(mode)
 {
 }
 
 AIAgent::~AIAgent() 
 {
-    if (mode == AIAgentMode::Inference) 
+    if (mode == AIAgentMode::INFERENCE) 
     {
         delete m_preprocessNet;
         delete m_moveNet;
@@ -134,6 +146,11 @@ AIAgentMode AIAgent::get_mode() const {
     return mode;
 }
 
+void godot::AIAgent::set_mode(AIAgentMode inMode)
+{
+    mode = inMode;
+}
+
 void AIAgent::Init(
     int input_dim, int move_dim, int shoot_dim,
      int entity_feature_dim, int embedding_dim, 
@@ -143,7 +160,7 @@ void AIAgent::Init(
     m_insize = input_dim;
     m_outSize = move_dim + shoot_dim;
     int n_entities = input_dim / entity_feature_dim;
-    if (mode == AIAgentMode::Inference) 
+    if (mode == AIAgentMode::INFERENCE) 
     {
         // 构建推理网络
         m_preprocessNet = new MiniBrain::Network<MiniBrain::Scalar>();
@@ -151,20 +168,20 @@ void AIAgent::Init(
         m_shootNet = new MiniBrain::Network<MiniBrain::Scalar>();
 
         m_preprocessNet->AddLayer(std::make_unique<MiniBrain::EmbeddingLayer<MiniBrain::Scalar>>(input_dim, entity_feature_dim, embedding_dim));
-        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::Scalar>>());
-        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::AttentionLayer<MiniBrain::Scalar>>(n_entities * embedding_dim, n_entities * embedding_dim, embedding_dim, attention_key_dim));
-        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePoolingLayer<MiniBrain::Scalar>>(n_entities * embedding_dim, embedding_dim));
-        auto gru_layer = std::make_unique<MiniBrain::GRULayer<MiniBrain::Scalar>>(embedding_dim, gru_hidden_dim);
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::Scalar>>());
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::Attention<MiniBrain::Scalar>>(n_entities * embedding_dim, n_entities * embedding_dim, embedding_dim, attention_key_dim));
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePooling<MiniBrain::Scalar>>(n_entities * embedding_dim, embedding_dim));
+        auto gru_layer = std::make_unique<MiniBrain::GRU<MiniBrain::Scalar>>(embedding_dim, gru_hidden_dim);
         m_GRULayer = gru_layer.get();
         m_preprocessNet->AddLayer(gru_layer);
 
-        m_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(gru_hidden_dim, out_hidden_dim));
-        m_moveNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::Scalar>>());
-        m_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(out_hidden_dim, move_dim));
+        m_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::Scalar>>(gru_hidden_dim, out_hidden_dim));
+        m_moveNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::Scalar>>());
+        m_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::Scalar>>(out_hidden_dim, move_dim));
 
-        m_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(gru_hidden_dim, out_hidden_dim));
-        m_shootNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::Scalar>>());
-        m_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::Scalar>>(out_hidden_dim, shoot_dim));
+        m_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::Scalar>>(gru_hidden_dim, out_hidden_dim));
+        m_shootNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::Scalar>>());
+        m_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::Scalar>>(out_hidden_dim, shoot_dim));
     }
     else 
     {
@@ -180,24 +197,24 @@ void AIAgent::Init(
         m_training_data = std::make_shared<TrainingData>();
 
         m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::EmbeddingLayer<MiniBrain::AutoDiffVar>>(input_dim, entity_feature_dim, embedding_dim));
-        m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::AutoDiffVar>>());
-        m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::AttentionLayer<MiniBrain::AutoDiffVar>>(n_entities * embedding_dim, n_entities * embedding_dim, embedding_dim, attention_key_dim));
-        m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePoolingLayer<MiniBrain::AutoDiffVar>>(n_entities * embedding_dim, embedding_dim));
-        auto gru_layer_train = std::make_unique<MiniBrain::GRULayer<MiniBrain::AutoDiffVar>>(embedding_dim, gru_hidden_dim);
+        m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::AutoDiffVar>>());
+        m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::Attention<MiniBrain::AutoDiffVar>>(n_entities * embedding_dim, n_entities * embedding_dim, embedding_dim, attention_key_dim));
+        m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePooling<MiniBrain::AutoDiffVar>>(n_entities * embedding_dim, embedding_dim));
+        auto gru_layer_train = std::make_unique<MiniBrain::GRU<MiniBrain::AutoDiffVar>>(embedding_dim, gru_hidden_dim);
         m_actor_GRULayer = gru_layer_train.get();
         m_actor_preprocessNet->AddLayer(gru_layer_train);
 
-        m_actor_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(gru_hidden_dim, out_hidden_dim));
-        m_actor_moveNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::AutoDiffVar>>());
-        m_actor_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(out_hidden_dim, move_dim));
+        m_actor_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(gru_hidden_dim, out_hidden_dim));
+        m_actor_moveNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::AutoDiffVar>>());
+        m_actor_moveNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(out_hidden_dim, move_dim));
 
-        m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(gru_hidden_dim, out_hidden_dim));
-        m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::AutoDiffVar>>());
-        m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(out_hidden_dim, shoot_dim));
+        m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(gru_hidden_dim, out_hidden_dim));
+        m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::AutoDiffVar>>());
+        m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(out_hidden_dim, shoot_dim));
 
-        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(embedding_dim, embedding_dim * 3));
-        m_criticNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::AutoDiffVar>>());
-        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(embedding_dim * 3, 1));
+        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(embedding_dim, embedding_dim * 3));
+        m_criticNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::AutoDiffVar>>());
+        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(embedding_dim * 3, 1));
         m_criticNet->SetLossFunc(std::make_unique<MiniBrain::RegressionMSE>());
     }   
 }
@@ -213,14 +230,14 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
 
     const int input_size = input.size();
 
-    MiniBrain::Matrix input_matrix(input_size, 1);
+    MiniBrain::Matrix<MiniBrain::Scalar> input_matrix(input_size, 1);
     
     std::copy(input.ptr(), input.ptr() + input_size, input_matrix.data());
 
-    MiniBrain::Matrix<Scalar> processedData = m_preprocessNet->Forward(input_matrix);
+    MiniBrain::Matrix<MiniBrain::Scalar> processedData = m_preprocessNet->Forward(input_matrix);
 
-    MiniBrain::Matrix<Scalar> moveData = m_moveNet->Forward(processedData);
-    MiniBrain::Matrix<Scalar> shootData = m_shootNet->Forward(processedData);
+    MiniBrain::Matrix<MiniBrain::Scalar> moveData = m_moveNet->Forward(processedData);
+    MiniBrain::Matrix<MiniBrain::Scalar> shootData = m_shootNet->Forward(processedData);
 
     MiniBrain::Scalar horizon = 0;
     MiniBrain::Scalar vertical = 0;
@@ -254,7 +271,7 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
 
     const int output_size = 4;
     output_array.resize(output_size);
-    MiniBrain::Matrix<Scalar> combinedOutput(output_size, 1);
+    MiniBrain::Matrix<MiniBrain::Scalar> combinedOutput(output_size, 1);
     combinedOutput << horizon, vertical, shootAngle, shootAction;
 
     std::copy(combinedOutput.data(), combinedOutput.data() + output_size, output_array.ptrw());
@@ -266,16 +283,16 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
 {
     if (!m_actor_preprocessNet || !m_actor_moveNet || !m_actor_shootNet) {
         godot::UtilityFunctions::push_error("Agent: Network is not set!");
-        return;
+        return godot::Array();
     }
 
     if (batch_data.size() == 0 ) {
         godot::UtilityFunctions::push_error("Agent: Batch input or target array is empty!");
-        return;
+        return godot::Array();
     }
 
     const int batch_size = batch_data.size();
-    MiniBrain::MatrixX<MiniBrain::AutoDiffVar> input_matrix(m_insize, batch_size);
+    MiniBrain::Matrix<MiniBrain::AutoDiffVar> input_matrix(m_insize, batch_size);
     m_training_data->buffer_input.setZero();
     m_training_data->buffer_action.setZero();
     m_training_data->input_mapping.clear();
@@ -284,7 +301,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
         
         if (sample.size() != m_insize) {
             godot::UtilityFunctions::push_error("Agent: Input sample " + godot::String::num(i) + " size mismatch!");
-            return;
+            return godot::Array();
         }        
 
         for (int in = 0; in < m_insize; in++)
@@ -428,19 +445,19 @@ void AIAgent::PushTrainingData(const godot::PackedFloat32Array& batch_rewards, c
 
 void AIAgent::Train(int step) 
 {
-    Eigen::Matrix<MiniBrain::Scalar> tdTarget(1, m_training_data->batch_size*m_training_data->num_frames);
-    Eigen::Matrix<MiniBrain::Scalar> advantage(1, m_training_data->batch_size*m_training_data->num_frames);
-    Eigen::Matrix<MiniBrain::Scalar> qValues(1, m_training_data->batch_size*m_training_data->num_frames);
-    Eigen::Matrix<MiniBrain::Scalar> tdDelta(1, m_training_data->batch_size*m_training_data->num_frames);
+    MiniBrain::Matrix<MiniBrain::Scalar> tdTarget(1, m_training_data->batch_size*m_training_data->num_frames);
+    MiniBrain::Matrix<MiniBrain::Scalar> advantage(1, m_training_data->batch_size*m_training_data->num_frames);
+    MiniBrain::Matrix<MiniBrain::Scalar> qValues(1, m_training_data->batch_size*m_training_data->num_frames);
+    MiniBrain::Matrix<MiniBrain::Scalar> tdDelta(1, m_training_data->batch_size*m_training_data->num_frames);
     
     tdTarget.array() = m_training_data->rewards.array() + m_gamma * m_training_data->old_critic_values.array() * (1.0 - m_training_data->done.array());
     tdDelta = tdTarget - m_training_data->old_q_values;
     for (int agent = 0; agent < m_training_data->batch_size; agent++)
     {
-        MiniBrain::Matrix<Scalar> agent_tdDelta = tdDelta(
+        MiniBrain::Matrix<MiniBrain::Scalar> agent_tdDelta = tdDelta(
             Eigen::all, 
             Eigen::seq(agent, m_training_data->batch_size * m_training_data->num_frames-1, m_training_data->batch_size));
-        MiniBrain::Matrix<Scalar> agent_advantage = advantage(
+        MiniBrain::Matrix<MiniBrain::Scalar> agent_advantage = advantage(
             Eigen::all, 
             Eigen::seq(agent, m_training_data->batch_size * m_training_data->num_frames-1, m_training_data->batch_size));
         
@@ -511,7 +528,7 @@ void AIAgent::Train(int step)
 
 void godot::AIAgent::SetBatchInfo(int batch_size, int action_dim, int num_frames)
 {
-    if(mode == AIAgentMode::Training)
+    if(mode == AIAgentMode::TRAINING)
     {
         m_actor_GRULayer->SetBatchSize(batch_size);
         m_training_data->Init(batch_size, num_frames, m_insize, action_dim);

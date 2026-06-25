@@ -27,5 +27,3 @@ namespace MiniBrain
         virtual std::string GetSubType() const override;
     };
 }
-
-#include "EmbeddingLayer.cpp"

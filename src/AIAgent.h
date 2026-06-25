@@ -6,6 +6,11 @@
 #include <godot_cpp/core/binder_common.hpp>
 #include <godot_cpp/core/gdvirtual.gen.inc>
 
+#include <memory>
+#include <unordered_map>
+
+#include "../MiniBrain/Source/MiniBrain.h"
+
 namespace godot {
 
     enum class AIAgentMode {
@@ -82,12 +87,12 @@ protected:
     MiniBrain::Network<MiniBrain::Scalar> *m_moveNet = nullptr;
     MiniBrain::Network<MiniBrain::Scalar> *m_shootNet = nullptr;
 
-    MiniBrain::Network<MiniBrain::Scalar>* m_GRULayer = nullptr;
+    MiniBrain::GRU<MiniBrain::Scalar>* m_GRULayer = nullptr;
     //训练模式用这个
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_preprocessNet = nullptr;
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_moveNet = nullptr;
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_shootNet = nullptr;
-    MiniBrain::Network<MiniBrain::Scalar>* m_actor_GRULayer = nullptr;
+    MiniBrain::GRU<MiniBrain::Scalar>* m_actor_GRULayer = nullptr;
 
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_criticNet = nullptr;
     
@@ -110,15 +115,17 @@ protected:
         float gamma, float lambda,
         MiniBrain::Matrix<MiniBrain::Scalar>& outAdvantage);
 public:
+    AIAgent();  // 无参构造函数供Godot使用
     AIAgent(AIAgentMode mode);
     ~AIAgent();
 
     void Init(
-        int input_dim, int output_dim, 
+        int input_dim, int move_dim, int shoot_dim,
         int entity_feature_dim, int embedding_dim=16, int attention_key_dim=16, int gru_hidden_dim = 128,
         int out_hidden_dim = 128);
 
     AIAgentMode get_mode() const;
+    void set_mode(AIAgentMode mode);
 
     PackedFloat32Array ProcessSensorData(const PackedFloat32Array &data);
     godot::Array BatchProcessSensorData(const godot::Array &batch_data, const godot::PackedInt32Array &agent_ids);
