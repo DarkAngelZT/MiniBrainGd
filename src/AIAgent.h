@@ -20,7 +20,8 @@ namespace godot {
         MiniBrain::Matrix<MiniBrain::Scalar> done;
 
         MiniBrain::Matrix<MiniBrain::Scalar> old_log_probs;
-        MiniBrain::Matrix<MiniBrain::Scalar> old_critic_values;
+        MiniBrain::Matrix<MiniBrain::Scalar> old_critic_values;//q value for next state
+        MiniBrain::Matrix<MiniBrain::Scalar> old_q_values;//q value of current state
 
         std::unordered_map<int, int> agent_write_index; // agent_id -> current write index
         int batch_size = 0;
@@ -30,6 +31,7 @@ namespace godot {
         MiniBrain::Matrix<MiniBrain::Scalar> buffer_input;
         MiniBrain::Matrix<MiniBrain::Scalar> buffer_action;
         MiniBrain::Matrix<MiniBrain::Scalar> buffer_log_probs;
+        MiniBrain::Matrix<MiniBrain::Scalar> buffer_q_values;
         std::unordered_map<int, int> input_mapping; // agent_id -> buffer column index        
 
         void Clear() {
@@ -39,9 +41,10 @@ namespace godot {
             done.setZero();
             old_log_probs.setZero();
             old_critic_values.setZero();
-
+            old_q_values.setZero();
             buffer_input.setZero();
             buffer_action.setZero();
+            buffer_q_values.setZero();
             buffer_log_probs.setZero();
             agent_write_index.clear();
             input_mapping.clear();
@@ -57,10 +60,12 @@ namespace godot {
             done.resize(1, inBatch_size*num_frames);
             old_critic_values.resize(1, inBatch_size*num_frames);
             old_log_probs.resize(1, inBatch_size*num_frames);
+            old_q_values.resize(1, inBatch_size*num_frames);
 
             buffer_input.resize(state_dim, inBatch_size);
             buffer_action.resize(action_dim, inBatch_size);
             buffer_log_probs.resize(1, inBatch_size);
+            buffer_q_values.resize(1, inBatch_size);
         }
     };
 
@@ -87,6 +92,7 @@ protected:
     MiniBrain::Network<MiniBrain::AutoDiffVar> *m_criticNet = nullptr;
     
     std::shared_ptr<TrainingData> m_training_data;
+    std::shared_ptr<MiniBrain::Adam> m_optimizer;
 
     float m_gamma = 0.93f;
     float m_lambda = 0.9f;
@@ -98,6 +104,11 @@ protected:
         const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &moveData, 
         const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &shootData,
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> &log_probs);
+
+    void ComputeAdvantage(
+        const MiniBrain::Matrix<MiniBrain::Scalar> &inTdDelta,
+        float gamma, float lambda,
+        MiniBrain::Matrix<MiniBrain::Scalar>& outAdvantage);
 public:
     AIAgent(AIAgentMode mode);
     ~AIAgent();

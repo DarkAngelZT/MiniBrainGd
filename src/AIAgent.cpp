@@ -31,6 +31,7 @@ void godot::AIAgent::CalculateLogProbs(
     using autodiff::reverse::detail::pow;
 
     int batch_size = action_new.cols();
+    const int move_rows = moveData.cols();
     log_probs.resize(1, batch_size);
     for (int i = 0; i < batch_size; i++) {
         MiniBrain::AutoDiffVar log_p_horizon = 0.0;
@@ -43,9 +44,9 @@ void godot::AIAgent::CalculateLogProbs(
 
         // --- 1. 计算水平移动的 Log Prob (Categorical Softmax LogProb) ---
         if (move_rows >= 3) {
-            MiniBrain::AutoDiffVar v0 = moveData(0, col);
-            MiniBrain::AutoDiffVar v1 = moveData(1, col);
-            MiniBrain::AutoDiffVar v2 = moveData(2, col);
+            MiniBrain::AutoDiffVar v0 = moveData(0, i);
+            MiniBrain::AutoDiffVar v1 = moveData(1, i);
+            MiniBrain::AutoDiffVar v2 = moveData(2, i);
 
             // 稳定的 Log-Sum-Exp 或者是标准的 Softmax Log 形式
             MiniBrain::Scalar max_v = std::max({v0.expr->val, v1.expr->val, v2.expr->val}); // 提升数值稳定性
@@ -59,9 +60,9 @@ void godot::AIAgent::CalculateLogProbs(
 
         // --- 2. 计算垂直移动的 Log Prob ---
         if (move_rows >= 6) {
-            MiniBrain::AutoDiffVar v3 = moveData(3, col);
-            MiniBrain::AutoDiffVar v4 = moveData(4, col);
-            MiniBrain::AutoDiffVar v5 = moveData(5, col);
+            MiniBrain::AutoDiffVar v3 = moveData(3, i);
+            MiniBrain::AutoDiffVar v4 = moveData(4, i);
+            MiniBrain::AutoDiffVar v5 = moveData(5, i);
             
             MiniBrain::Scalar max_v = std::max({v3.expr->val, v4.expr->val, v5.expr->val});
             MiniBrain::AutoDiffVar log_z = max_v + log(exp(v3 - max_v) + exp(v4 - max_v) + exp(v5 - max_v));
@@ -83,8 +84,23 @@ void godot::AIAgent::CalculateLogProbs(
 
         // --- 4. 对应 PyTorch 中的 .sum(1) 操作 ---
         // 独立动作的对数概率直接相加
-        log_probs(0, col) = log_p_horizon + log_p_vertical + log_p_angle;
+        log_probs(0, i) = log_p_horizon + log_p_vertical + log_p_angle;
     }
+}
+
+void godot::AIAgent::ComputeAdvantage(const MiniBrain::Matrix<MiniBrain::Scalar> &inTdDelta, float gamma, float lambda, MiniBrain::Matrix<MiniBrain::Scalar> &outAdvantage)
+{
+    int batch_size = inTdDelta.cols();
+    
+    auto advList = std::vector<MiniBrain::Scalar>(batch_size);
+    MiniBrain::Scalar last_adv = 0.0;
+    for (int i = batch_size - 1; i >= 0; --i) {
+        MiniBrain::Scalar delta = inTdDelta(0, i);
+        last_adv = delta + gamma * lambda * last_adv;
+        advList[i] = last_adv;
+    }
+    Eigen::Map<MiniBrain::Matrix<MiniBrain::Scalar>> advMatrix(advList.data(), 1, batch_size);
+    outAdvantage = advMatrix;
 }
 
 AIAgent::AIAgent(AIAgentMode mode) : mode(mode)
@@ -110,6 +126,7 @@ AIAgent::~AIAgent()
         delete m_criticNet;
 
         m_training_data.reset();
+        m_optimizer.reset();
     }
 }
 
@@ -158,6 +175,8 @@ void AIAgent::Init(
 
         m_criticNet = new MiniBrain::Network<MiniBrain::AutoDiffVar>();
 
+        m_optimizer = std::make_shared<MiniBrain::Adam>();
+
         m_training_data = std::make_shared<TrainingData>();
 
         m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::EmbeddingLayer<MiniBrain::AutoDiffVar>>(input_dim, entity_feature_dim, embedding_dim));
@@ -175,6 +194,11 @@ void AIAgent::Init(
         m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(gru_hidden_dim, out_hidden_dim));
         m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::AutoDiffVar>>());
         m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(out_hidden_dim, shoot_dim));
+
+        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(embedding_dim, embedding_dim * 3));
+        m_criticNet->AddLayer(std::make_unique<MiniBrain::ReLULayer<MiniBrain::AutoDiffVar>>());
+        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnectedLayer<MiniBrain::AutoDiffVar>>(embedding_dim * 3, 1));
+        m_criticNet->SetLossFunc(std::make_unique<MiniBrain::RegressionMSE>());
     }   
 }
 
@@ -253,7 +277,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     const int batch_size = batch_data.size();
     MiniBrain::MatrixX<MiniBrain::AutoDiffVar> input_matrix(m_insize, batch_size);
     m_training_data->buffer_input.setZero();
-    m_training_data>buffer_action.setZero();
+    m_training_data->buffer_action.setZero();
     m_training_data->input_mapping.clear();
     for (int i = 0; i < batch_size; ++i) {
         godot::PackedFloat32Array sample = batch_data[i];
@@ -274,12 +298,29 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     auto moveData = m_actor_moveNet->Forward(processedData);
     auto shootData = m_actor_shootNet->Forward(processedData);
 
+    auto q = m_criticNet->Forward(processedData);
+    m_training_data->buffer_q_values = q.unaryExpr([](const MiniBrain::AutoDiffVar& v) { return v.expr->val; });
+    for (int i = 0; i < batch_size; ++i) {
+        //给上一个状态记录next state的q value
+        int id = agent_ids[i];
+        int index = m_training_data->agent_write_index[id] - batch_size;
+        if (index < 0)
+        {
+            //这里就是直接结束，只要出现负数说明这是第一帧数据，
+            //没有上一帧需要更新next state q
+            break;
+        }
+        
+        int buffer_index = m_training_data->input_mapping[id];
+        m_training_data->old_critic_values(0, index) = q(0, buffer_index).expr->val;
+    }
     static std::mt19937 gen(std::random_device{}());
 
     godot::Array batch_array;
     batch_array.resize(batch_size);
 
-    const int output_size= 4;
+    const int output_size = 4;
+    const int move_rows = moveData.rows();
 
     for (int col = 0; col < batch_size; ++col) 
     {
@@ -380,14 +421,37 @@ void AIAgent::PushTrainingData(const godot::PackedFloat32Array& batch_rewards, c
         m_training_data->old_log_probs(0, index) = m_training_data->buffer_log_probs(0, buffer_index);
         m_training_data->rewards(0, index) = rewards;
         m_training_data->done(0, index) = done;
+
+        m_training_data->old_critic_values(0, index) = m_training_data->buffer_q_values(0, buffer_index);
     }
 }
 
 void AIAgent::Train(int step) 
 {
+    Eigen::Matrix<MiniBrain::Scalar> tdTarget(1, m_training_data->batch_size*m_training_data->num_frames);
+    Eigen::Matrix<MiniBrain::Scalar> advantage(1, m_training_data->batch_size*m_training_data->num_frames);
+    Eigen::Matrix<MiniBrain::Scalar> qValues(1, m_training_data->batch_size*m_training_data->num_frames);
+    Eigen::Matrix<MiniBrain::Scalar> tdDelta(1, m_training_data->batch_size*m_training_data->num_frames);
+    
+    tdTarget.array() = m_training_data->rewards.array() + m_gamma * m_training_data->old_critic_values.array() * (1.0 - m_training_data->done.array());
+    tdDelta = tdTarget - m_training_data->old_q_values;
+    for (int agent = 0; agent < m_training_data->batch_size; agent++)
+    {
+        MiniBrain::Matrix<Scalar> agent_tdDelta = tdDelta(
+            Eigen::all, 
+            Eigen::seq(agent, m_training_data->batch_size * m_training_data->num_frames-1, m_training_data->batch_size));
+        MiniBrain::Matrix<Scalar> agent_advantage = advantage(
+            Eigen::all, 
+            Eigen::seq(agent, m_training_data->batch_size * m_training_data->num_frames-1, m_training_data->batch_size));
+        
+        ComputeAdvantage(agent_tdDelta, m_gamma, m_lambda, agent_advantage);
+    }    
+
     for (int epoch = 0; epoch < step; ++epoch) 
     {
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> batch_log_probs(1, m_training_data->batch_size*m_training_data->num_frames);
+        MiniBrain::Matrix<MiniBrain::AutoDiffVar> batch_new_q_values(1, m_training_data->batch_size*m_training_data->num_frames);
+        
         for (int f = 0; f < m_training_data->num_frames; f++)
         {
             //顺序跑每一帧
@@ -406,10 +470,42 @@ void AIAgent::Train(int step)
             CalculateLogProbs(batch_actions, moveData, shootData, log_probs);
             int index = f * m_training_data->batch_size;
             batch_log_probs.block(0, index, 1, m_training_data->batch_size) = log_probs;
+
+            batch_new_q_values.block(0, index, 1, m_training_data->batch_size) = m_criticNet->Forward(processedData);
         }
         //计算PPO
-        
-        //更新
+        const MiniBrain::Scalar lower = 1.0 - m_clip_epsilon;
+        const MiniBrain::Scalar upper = 1.0 + m_clip_epsilon;
+        MiniBrain::Matrix<MiniBrain::AutoDiffVar> ratio = (batch_log_probs - m_training_data->old_log_probs.cast<MiniBrain::AutoDiffVar>()).array().exp();
+        MiniBrain::Matrix<MiniBrain::AutoDiffVar> surrogate1 = ratio.array() * advantage.cast<MiniBrain::AutoDiffVar>().array();
+        auto clampedRatio = ratio.unaryExpr([lower, upper](const MiniBrain::AutoDiffVar& x)
+        {
+            if (x.expr->val < lower)
+            {
+                return MiniBrain::AutoDiffVar(lower);
+            }
+            if (x.expr->val > upper)
+            {
+                return MiniBrain::AutoDiffVar(upper);
+            }
+            return x;
+        });
+        MiniBrain::Matrix<MiniBrain::AutoDiffVar> surrogate2 = clampedRatio.array() * advantage.cast<MiniBrain::AutoDiffVar>().array();
+
+        auto clipped_surrogate = surrogate1.cwiseMin(surrogate2);
+        MiniBrain::AutoDiffVar actor_loss = -clipped_surrogate.sum() / static_cast<MiniBrain::Scalar>(m_training_data->batch_size * m_training_data->num_frames);
+
+        // 更新
+        m_actor_preprocessNet->Backward(actor_loss);
+        m_actor_moveNet->Backward(actor_loss);
+        m_actor_shootNet->Backward(actor_loss);
+
+        m_criticNet->Backward(batch_new_q_values, tdTarget.cast<MiniBrain::AutoDiffVar>());
+
+        m_actor_preprocessNet->Update(*m_optimizer);
+        m_actor_moveNet->Update(*m_optimizer);
+        m_actor_shootNet->Update(*m_optimizer);
+        m_criticNet->Update(*m_optimizer);
     }
 }
 
@@ -417,7 +513,7 @@ void godot::AIAgent::SetBatchInfo(int batch_size, int action_dim, int num_frames
 {
     if(mode == AIAgentMode::Training)
     {
-        m_actor_GRLayer->SetBatchSize(batch_size);
+        m_actor_GRULayer->SetBatchSize(batch_size);
         m_training_data->Init(batch_size, num_frames, m_insize, action_dim);
     }
     else
