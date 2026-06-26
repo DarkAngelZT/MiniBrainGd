@@ -1,18 +1,13 @@
-{
-  "format": 2,
-  "entry": "res://",
-  "library": {
-    "Windows": {
-      "debug": "bin/MiniBrainGd.windows.debug.x86_64.dll",
-      "release": "bin/MiniBrainGd.windows.release.x86_64.dll"
-    },
-    "Linux": {
-      "debug": "bin/libMiniBrainGd.debug.x86_64.so",
-      "release": "bin/libMiniBrainGd.release.x86_64.so"
-    },
-    "MacOS": {
-      "release": "bin/libMiniBrainGd.release.x86_64.dylib"
-    }
-  },
-  "dependencies": []
-}
+[configuration]
+entry_symbol = "minibrain_library_init"
+compatibility_minimum = "4.5"
+reloadable = true
+
+[libraries]
+windows.debug.x86_64 = "res://bin/libMiniBrainGd.windows.debug.x86_64.dll"
+windows.release.x86_64 = "res://bin/libMiniBrainGd.windows.release.x86_64.dll"
+linux.debug.x86_64 = "res://bin/libMiniBrainGd.debug.x86_64.so"
+linux.release.x86_64 = "res://bin/libMiniBrainGd.release.x86_64.so"
+macos.release = "res://bin/libMiniBrainGd.release.x86_64.dylib"
+
+[dependencies]

@@ -4,7 +4,7 @@ cd /d "%~dp0"
 setlocal enabledelayedexpansion
 
 :: Usage: build_all.bat LLVM_BIN_PATH [target] [jobs]
-:: Example 1 (Dev): build_all.bat D:\llvm-mingw\bin editor
+:: Example 1 (Dev): build_all.bat D:\llvm-mingw\bin template_debug
 :: Example 2 (Release): build_all.bat D:\llvm-mingw\bin template_release 8
 
 if "%~1"=="" (
@@ -14,7 +14,7 @@ if "%~1"=="" (
 )
 set "LLVM_BIN=%~1"
 
-set "TARGET=editor"
+set "TARGET=template_debug"
 if not "%~2"=="" set "TARGET=%~2"
 
 set "JOBS=%NUMBER_OF_PROCESSORS%"

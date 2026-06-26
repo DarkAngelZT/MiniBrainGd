@@ -137,6 +137,12 @@ public:
     void SetBatchInfo(int batch_size, int action_dim, int num_frames=1);
 
     void SetLearningParameters(float gamma=0.93f, float lambda=0.9f, float clip_epsilon=0.2f, float continuous_gamma=0.9f);
+
+    // 保存与加载网络参数
+    void Save(const godot::String &parent_folder = godot::String("ai"), const godot::String &file_name = godot::String("checkpoint"));
+    void Load(const godot::String &parent_folder = godot::String("ai"), const godot::String &file_name = godot::String("checkpoint"));
+
+    
 };
 
 } // namespace godot

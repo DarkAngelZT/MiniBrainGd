@@ -16,7 +16,7 @@ if "%~1"=="" (
 )
 set "LLVM_BIN=%~1"
 
-set "TARGET=editor"
+set "TARGET=template_debug"
 if not "%~2"=="" set "TARGET=%~2"
 
 set "PATH=!LLVM_BIN!;%PATH%"

@@ -1,6 +1,7 @@
 #include "AIAgent.h"
 #include "EmbeddingLayer.h"
 #include "StatePooling.h"
+#include "IO.h"
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -22,6 +23,11 @@ void AIAgent::_bind_methods()
     ClassDB::bind_method(D_METHOD("Train", "step"), &AIAgent::Train);
     ClassDB::bind_method(D_METHOD("SetBatchInfo", "batch_size", "action_dim", "num_frames"), &AIAgent::SetBatchInfo, DEFVAL(1));
     ClassDB::bind_method(D_METHOD("SetLearningParameters", "gamma", "lambda", "clip_epsilon", "continuous_gamma"), &AIAgent::SetLearningParameters, DEFVAL(0.93f), DEFVAL(0.9f), DEFVAL(0.2f), DEFVAL(0.9f));
+
+    ClassDB::bind_method(D_METHOD("Save", "parent_folder", "file_name"), &AIAgent::Save,
+        DEFVAL("ai"), DEFVAL("checkpoint"));
+    ClassDB::bind_method(D_METHOD("Load", "parent_folder", "file_name"), &AIAgent::Load,
+        DEFVAL("ai"), DEFVAL("checkpoint"));
 
     BIND_ENUM_CONSTANT(TRAINING);
     BIND_ENUM_CONSTANT(INFERENCE);
@@ -547,4 +553,61 @@ void godot::AIAgent::SetLearningParameters(float gamma, float lambda, float clip
     m_lambda = lambda;
     m_clip_epsilon = clip_epsilon;
     m_continuous_gamma = continuous_gamma;
+}
+
+static std::string ToStdString(const godot::String &s)
+{
+    return std::string(s.utf8().get_data());
+}
+
+static std::string MakePath(const std::string &parent, const std::string &name)
+{
+    if (name.empty()) return std::string();
+    std::string p = parent;
+    if (!p.empty() && p.back() != '/' && p.back() != '\\') p += '/';
+    p += name;
+    p += ".param";
+    return p;
+}
+
+void godot::AIAgent::Save(const godot::String &parent_folder, const godot::String &file_name)
+{
+    std::string parent = ToStdString(parent_folder);
+    std::string file = ToStdString(file_name);
+
+    if (mode == AIAgentMode::INFERENCE)
+    {
+        SaveCheckPoint<MiniBrain::Scalar>(MakePath(parent, file),m_preprocessNet,m_moveNet,m_shootNet, nullptr);
+    }
+    else
+    {
+        SaveCheckPoint<MiniBrain::AutoDiffVar>(
+            MakePath(parent, file), 
+            m_actor_preprocessNet, 
+            m_actor_moveNet, 
+            m_actor_shootNet,
+            m_criticNet
+        );
+    }
+}
+
+void godot::AIAgent::Load(const godot::String &parent_folder, const godot::String &file_name)
+{
+    std::string parent = ToStdString(parent_folder);
+    std::string file = ToStdString(file_name);
+
+    if (mode == AIAgentMode::INFERENCE)
+    {
+        LoadCheckPoint<MiniBrain::Scalar>(MakePath(parent,file), m_preprocessNet, m_moveNet, m_shootNet, nullptr);
+    }
+    else
+    {
+        LoadCheckPoint<MiniBrain::AutoDiffVar>(
+            MakePath(parent,file), 
+            m_actor_preprocessNet, 
+            m_actor_moveNet, 
+            m_actor_shootNet, 
+            m_criticNet
+        );
+    }
 }

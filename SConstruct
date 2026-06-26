@@ -23,19 +23,29 @@ env.Append(CPPPATH=[
 # Collects all .cpp files in the 'src' folder as compile targets.
 sources = Glob("src/*.cpp")
 
-# The filename for the dynamic library for this GDExtension.
-# $SHLIBPREFIX is a platform specific prefix for the dynamic library ('lib' on Unix, '' on Windows).
-# $SHLIBSUFFIX is the platform specific suffix for the dynamic library (for example '.dll' on Windows).
-# env["suffix"] includes the build's feature tags (e.g. '.windows.template_debug.x86_64')
-# (see https://docs.godotengine.org/en/stable/tutorials/export/feature_tags.html).
-# The final path should match a path in the '.gdextension' file.
-lib_filename = "{}MiniBrainGd{}{}".format(env.subst('$SHLIBPREFIX'), env["suffix"], env.subst('$SHLIBSUFFIX'))
-
-# Creates a SCons target for the path with our sources.
-library = env.SharedLibrary(
-    "bin/{}".format(lib_filename),
-    source=sources,
-)
+if env["platform"] == "macos":
+    library = env.SharedLibrary(
+        "bin/libMiniBrainGd.{}.{}.framework/libMiniBrainGd.{}.{}".format(
+            env["platform"], env["target"], env["platform"], env["target"]
+        ),
+        source=sources,
+    )
+elif env["platform"] == "ios":
+    if env["ios_simulator"]:
+        library = env.StaticLibrary(
+            "bin/libMiniBrainGd.{}.{}.simulator.a".format(env["platform"], env["target"]),
+            source=sources,
+        )
+    else:
+        library = env.StaticLibrary(
+            "bin/libMiniBrainGd.{}.{}.a".format(env["platform"], env["target"]),
+            source=sources,
+        )
+else:
+    library = env.SharedLibrary(
+        "bin/libMiniBrainGd{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+        source=sources,
+    )
 
 # Selects the shared library as the default target.
 Default(library)
