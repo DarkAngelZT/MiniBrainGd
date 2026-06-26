@@ -17,7 +17,7 @@ void AIAgent::_bind_methods()
     ClassDB::bind_method(D_METHOD("Init", "input_dim", "move_dim", "shoot_dim", "entity_feature_dim", "embedding_dim", "attention_key_dim", "gru_hidden_dim", "out_hidden_dim"), &AIAgent::Init, DEFVAL(16), DEFVAL(16), DEFVAL(128), DEFVAL(128));
     ClassDB::bind_method(D_METHOD("get_mode"), &AIAgent::get_mode);
     ClassDB::bind_method(D_METHOD("set_mode", "mode"), &AIAgent::set_mode);
-    ClassDB::bind_method(D_METHOD("ProcessSensorData", "data"), &AIAgent::ProcessSensorData);
+    ClassDB::bind_method(D_METHOD("ProcessSensorData", "data", "isGameEnd"), &AIAgent::ProcessSensorData, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("BatchProcessSensorData", "batch_data", "agent_ids"), &AIAgent::BatchProcessSensorData);
     ClassDB::bind_method(D_METHOD("PushTrainingData", "batch_rewards", "agent_ids", "batch_dones"), &AIAgent::PushTrainingData);
     ClassDB::bind_method(D_METHOD("Train", "step"), &AIAgent::Train);
@@ -226,7 +226,7 @@ void AIAgent::Init(
     }   
 }
 
-PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input) 
+PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input, bool isGameEnd) 
 {
     godot::PackedFloat32Array output_array;
 
@@ -245,6 +245,12 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input)
 
     MiniBrain::Matrix<MiniBrain::Scalar> moveData = m_moveNet->Forward(processedData);
     MiniBrain::Matrix<MiniBrain::Scalar> shootData = m_shootNet->Forward(processedData);
+
+    if (isGameEnd)
+    {
+        m_GRULayer->ResetAllMemory();
+    }
+    
 
     MiniBrain::Scalar horizon = 0;
     MiniBrain::Scalar vertical = 0;
@@ -447,6 +453,12 @@ void AIAgent::PushTrainingData(const godot::PackedFloat32Array& batch_rewards, c
         m_training_data->done(0, index) = done;
 
         m_training_data->old_critic_values(0, index) = m_training_data->buffer_q_values(0, buffer_index);
+
+        if (done > 0)
+        {
+            m_actor_GRULayer->ResetMemory(i);
+        }
+        
     }
 }
 
@@ -473,6 +485,7 @@ void AIAgent::Train(int step)
 
     for (int epoch = 0; epoch < step; ++epoch) 
     {
+        m_actor_GRULayer->ResetAllMemory();
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> batch_log_probs(1, m_training_data->batch_size*m_training_data->num_frames);
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> batch_new_q_values(1, m_training_data->batch_size*m_training_data->num_frames);
         
@@ -483,6 +496,8 @@ void AIAgent::Train(int step)
                 0, f * m_training_data->batch_size, m_training_data->state.rows(), m_training_data->batch_size);
             MiniBrain::Matrix<MiniBrain::Scalar> batch_actions = m_training_data->actions.block(
                 0, f * m_training_data->batch_size, m_training_data->actions.rows(),m_training_data->batch_size);
+            MiniBrain::Matrix<MiniBrain::Scalar> batch_dones = m_training_data->done.block(
+                0, f * m_training_data->batch_size, m_training_data->done.rows(),m_training_data->batch_size);
             
             MiniBrain::Matrix<MiniBrain::AutoDiffVar> input_matrix = batch_states.cast<MiniBrain::AutoDiffVar>();
             
@@ -496,6 +511,15 @@ void AIAgent::Train(int step)
             batch_log_probs.block(0, index, 1, m_training_data->batch_size) = log_probs;
 
             batch_new_q_values.block(0, index, 1, m_training_data->batch_size) = m_criticNet->Forward(processedData);
+
+            for (int agent = 0; agent < m_training_data->batch_size; agent++)
+            {
+                if (batch_dones(0,agent) > 0)
+                {
+                    m_actor_GRULayer->ResetMemory(agent);
+                }
+            }
+            
         }
         //计算PPO
         const MiniBrain::Scalar lower = 1.0 - m_clip_epsilon;

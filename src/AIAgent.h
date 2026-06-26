@@ -127,7 +127,7 @@ public:
     AIAgentMode get_mode() const;
     void set_mode(AIAgentMode mode);
 
-    PackedFloat32Array ProcessSensorData(const PackedFloat32Array &data);
+    PackedFloat32Array ProcessSensorData(const PackedFloat32Array &data, bool isGameEnd = false);
     godot::Array BatchProcessSensorData(const godot::Array &batch_data, const godot::PackedInt32Array &agent_ids);
 
     void PushTrainingData(const godot::PackedFloat32Array& batch_rewards, const godot::PackedInt32Array &agent_ids, const godot::PackedFloat32Array &batch_dones);

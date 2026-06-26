@@ -4,10 +4,10 @@ compatibility_minimum = "4.5"
 reloadable = true
 
 [libraries]
-windows.debug.x86_64 = "res://bin/libMiniBrainGd.windows.debug.x86_64.dll"
-windows.release.x86_64 = "res://bin/libMiniBrainGd.windows.release.x86_64.dll"
-linux.debug.x86_64 = "res://bin/libMiniBrainGd.debug.x86_64.so"
-linux.release.x86_64 = "res://bin/libMiniBrainGd.release.x86_64.so"
-macos.release = "res://bin/libMiniBrainGd.release.x86_64.dylib"
+windows.debug.x86_64 = "res://bin/libMiniBrainGd.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://bin/libMiniBrainGd.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://bin/libMiniBrainGd.template_debug.x86_64.so"
+linux.release.x86_64 = "res://bin/libMiniBrainGd.template_release.x86_64.so"
+macos.release = "res://bin/libMiniBrainGd.template_release.x86_64.dylib"
 
 [dependencies]

@@ -62,12 +62,13 @@ var actions = agent.ProcessSensorData(input_vector)
 
 #### 主要函数
 
-**`ProcessSensorData(data: PackedFloat32Array) -> PackedFloat32Array`**
+**`ProcessSensorData(data: PackedFloat32Array, isGameEnd: bool) -> PackedFloat32Array`**
 
 对单条输入进行推理。
 
 - **参数**：
   - `data`: 长度为 `input_dim` 的浮点数组，包含场景状态（如多个实体的位置、速度等特征）
+  - `isGameEnd`: 标志位，标识当前游戏是否结束，结束会自动清空GRU记忆，防止后续数据产生记忆跳变
 
 - **返回**：
   - 长度为 4 的动作数组：
