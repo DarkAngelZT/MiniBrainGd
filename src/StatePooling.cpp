@@ -79,9 +79,9 @@ namespace MiniBrain {
                 // 3. 拼接 Mean 和 Max 写入输出的一行 (1 x 2D)
                 outData.block(0, b, m_featureDim, 1) = mean_val;
                 outData.block(m_featureDim, b, m_featureDim, 1) = max_val;
-            }
-            return outData;
-        }       
+            }            
+        }
+        return outData;
     }
 
     template<typename T>
