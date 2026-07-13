@@ -43,6 +43,10 @@ void godot::AIAgent::CalculateLogProbs(
     using autodiff::reverse::detail::log;
     using autodiff::reverse::detail::abs;
     using autodiff::reverse::detail::pow;
+    using autodiff::reverse::detail::atan2;
+    using autodiff::reverse::detail::sqrt;
+    using autodiff::reverse::detail::sin;
+    using autodiff::reverse::detail::cos;
 
     int batch_size = action_new.cols();
     const int move_rows = moveData.cols();
@@ -87,15 +91,29 @@ void godot::AIAgent::CalculateLogProbs(
         }
 
         // --- 3. 计算高斯分布射击角度的 Log Prob (Gaussian LogProb) ---
-        MiniBrain::AutoDiffVar mean = shootData(0, i);
-        MiniBrain::AutoDiffVar var  = shootData(1, i);
-        // 确保方差严格大于 0（可以使用 softplus 或者 abs + epsilon）
-        MiniBrain::AutoDiffVar std_dev_sq = abs(var) + 1e-6; 
+        MiniBrain::AutoDiffVar angleX = shootData(0, i);
+        MiniBrain::AutoDiffVar angleY  = shootData(1, i);
+        MiniBrain::AutoDiffVar var  = shootData(2, i);
+        
+        MiniBrain::AutoDiffVar std_dev = sqrt(abs(var) + 1e-6); 
+        MiniBrain::AutoDiffVar angle = atan2(angleY, angleX);
+        MiniBrain::Scalar actionAngle = atan2(action_new(i, 3), action_new(i, 2));
 
-        // 高斯分布对数概率公式： -0.5 * ln(2 * pi * sigma^2) - (x - mu)^2 / (2 * sigma^2)
-        constexpr double PI = 3.141592653589793;
-        log_p_angle = -0.5 * log(2.0 * PI * std_dev_sq) - pow(act_angle - mean, 2) / (2.0 * std_dev_sq);
-
+        // 2. 计算动作与均值之间的初始角度差
+        MiniBrain::AutoDiffVar delta_theta = MiniBrain::AutoDiffVar(actionAngle) - angle;
+        
+        // 3. 核心步骤：将角度差映射回 [-pi, pi] 区间，消除神经网络的边界突变断层
+        delta_theta = atan2(sin(delta_theta), cos(delta_theta));
+        
+        // 4. 计算一维高斯分布的方差归一化项
+        MiniBrain::AutoDiffVar normalized_diff = delta_theta / std_dev;
+        MiniBrain::AutoDiffVar variance_term = -0.5 * normalized_diff * normalized_diff;
+        
+        // 5. 计算常数项: 0.5 * ln(2 * pi) 约等于 0.9189385332046727
+        constexpr MiniBrain::Scalar half_log_two_pi = 0.9189385332046727;
+        
+        // 6. 汇总计算对数概率
+        log_p_angle = variance_term - log(std_dev) - half_log_two_pi;
         // --- 4. 对应 PyTorch 中的 .sum(1) 操作 ---
         // 独立动作的对数概率直接相加
         log_probs(0, i) = log_p_horizon + log_p_vertical + log_p_angle;
@@ -278,14 +296,20 @@ PackedFloat32Array AIAgent::ProcessSensorData(const PackedFloat32Array &input, b
         vertical = max_index - 3;
     }
 
-    MiniBrain::Scalar shootAngle = std::tanh(shootData(0, 0))*180;
-    MiniBrain::Scalar shootProb = 1.0f / (1.0f + exp(-shootData(2, 0)));
+    MiniBrain::Scalar shootAngleX = shootData(0, 0);
+    MiniBrain::Scalar shootAngleY = shootData(1, 0);
+    MiniBrain::Scalar len = std::sqrt(shootAngleX * shootAngleX + shootAngleY * shootAngleY);
+    if (len > 0.0f) {
+        shootAngleX /= len;
+        shootAngleY /= len;
+    }
+    MiniBrain::Scalar shootProb = 1.0f / (1.0f + exp(-shootData(3, 0)));//index=2是标准差，这里忽略
     MiniBrain::Scalar shootAction = shootProb > 0.5 ? 1.0 : 0.0;
 
-    const int output_size = 4;
+    const int output_size = 5;
     output_array.resize(output_size);
     MiniBrain::Matrix<MiniBrain::Scalar> combinedOutput(output_size, 1);
-    combinedOutput << horizon, vertical, shootAngle, shootAction;
+    combinedOutput << horizon, vertical, shootAngleX, shootAngleY, shootAction;
 
     std::copy(combinedOutput.data(), combinedOutput.data() + output_size, output_array.ptrw());
 
@@ -349,7 +373,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     godot::Array batch_array;
     batch_array.resize(batch_size);
 
-    const int output_size = 4;
+    const int output_size = 5;
     const int move_rows = moveData.rows();
 
     for (int col = 0; col < batch_size; ++col) 
@@ -385,27 +409,29 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
             vertical = dist_vert(gen); // 随机生成 0, 1, 2
         }
 
-        MiniBrain::Scalar mean = shootData(0, col).expr->val; // 直接使用网络输出作为均值
-        MiniBrain::Scalar var  = shootData(1, col).expr->val;
-        
-        // 确保方差为正数（网络输出可能为负），取绝对值并加上微小值防止为0
+        MiniBrain::Scalar shootAngleXMean = shootData(0, col).expr->val; // 直接使用网络输出作为均值
+        MiniBrain::Scalar shootAngleYMean  = shootData(1, col).expr->val;
+        MiniBrain::Scalar var = shootData(2, col).expr->val; // 网络输出的方差
+
         MiniBrain::Scalar std_dev = std::sqrt(std::abs(var) + 1e-6); 
 
-        std::normal_distribution<MiniBrain::Scalar> dist_angle(mean, std_dev);
-        MiniBrain::Scalar shootAngle = dist_angle(gen);
+        std::normal_distribution<MiniBrain::Scalar> dist_angle(0.0, 1.0);
+        MiniBrain::Scalar shootAngleX = shootAngleXMean + std_dev * dist_angle(gen);
+        MiniBrain::Scalar shootAngleY = shootAngleYMean + std_dev * dist_angle(gen);
 
-        action(2) = shootAngle;
+        MiniBrain::Scalar length = std::sqrt(shootAngleX * shootAngleX + shootAngleY * shootAngleY);
 
-        shootAngle = std::tanh(shootAngle)*180;
+        action(2) = shootAngleX;
+        action(3) = shootAngleY;
 
         // --- 4. 处理射击动作 (第 2 行，原概率逻辑不变) ---
-        MiniBrain::Scalar shoot_logits = shootData(2, col).expr->val;
+        MiniBrain::Scalar shoot_logits = shootData(3, col).expr->val;
         MiniBrain::Scalar shootProb = 1.0f / (1.0f + std::exp(-shoot_logits));
         MiniBrain::Scalar shootAction = shootProb > 0.5 ? 1.0 : 0.0;
 
         action(0) = horizon;
         action(1) = vertical;
-        action(3) = shoot_logits;
+        action(4) = shoot_logits;
 
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> log_prob(1, 1);
         CalculateLogProbs(action, moveData.block(0, col, moveData.rows(), 1), shootData.block(0, col, shootData.rows(), 1), log_prob);
@@ -413,10 +439,20 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
         m_training_data->buffer_action.col(col) = action;
         m_training_data->buffer_log_probs(0, col) = log_prob(0, 0).expr->val;
 
+        //算log prob要用没归一化之前的，所以算完了再归一化
+        if (length > 1e-6) {
+            shootAngleX /= length;
+            shootAngleY /= length;
+        } else {
+            shootAngleX = 1.0f;
+            shootAngleY = 0.0f;
+        }
+
         output_array[0] = horizon;
         output_array[1] = vertical;
-        output_array[2] = shootAngle;
-        output_array[3] = shootAction;
+        output_array[2] = shootAngleX;
+        output_array[3] = shootAngleY;
+        output_array[4] = shootAction;
 
         batch_array[col] = output_array;
     }
