@@ -49,7 +49,7 @@ void godot::AIAgent::CalculateLogProbs(
     using autodiff::reverse::detail::cos;
 
     int batch_size = action_new.cols();
-    const int move_rows = moveData.cols();
+    const int move_rows = moveData.rows();
     log_probs.resize(1, batch_size);
     for (int i = 0; i < batch_size; i++) {
         MiniBrain::AutoDiffVar log_p_horizon = 0.0;
@@ -167,11 +167,11 @@ AIAgent::~AIAgent()
     }
 }
 
-AIAgentMode AIAgent::get_mode() const {
+godot::AIAgent::AIAgentMode AIAgent::get_mode() const {
     return mode;
 }
 
-void godot::AIAgent::set_mode(AIAgentMode inMode)
+void godot::AIAgent::set_mode(godot::AIAgent::AIAgentMode inMode)
 {
     mode = inMode;
 }

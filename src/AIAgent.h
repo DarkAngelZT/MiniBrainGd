@@ -13,11 +13,6 @@
 
 namespace godot {
 
-    enum AIAgentMode {
-        TRAINING,
-        INFERENCE
-    };
-
     struct TrainingData {
         MiniBrain::Matrix<MiniBrain::Scalar> state;
         MiniBrain::Matrix<MiniBrain::Scalar> actions;
@@ -76,7 +71,11 @@ namespace godot {
 
 class AIAgent: public Object {
     GDCLASS(AIAgent, Object);
-
+public:
+    enum AIAgentMode {
+        INFERENCE = 0,
+        TRAINING = 1
+    };
 protected:
     static void _bind_methods();
     AIAgentMode mode;
@@ -147,4 +146,4 @@ public:
 
 } // namespace godot
 
-VARIANT_ENUM_CAST(godot::AIAgentMode)
+VARIANT_ENUM_CAST(AIAgent::AIAgentMode)
