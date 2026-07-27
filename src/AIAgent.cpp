@@ -575,7 +575,7 @@ void AIAgent::Train(int step)
         const MiniBrain::Scalar upper = 1.0 + m_clip_epsilon;
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> ratio = (batch_log_probs - m_training_data->old_log_probs.cast<MiniBrain::AutoDiffVar>()).array().exp();
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> surrogate1 = ratio.array() * advantage.cast<MiniBrain::AutoDiffVar>().array();
-        auto clampedRatio = ratio.unaryExpr([lower, upper](const MiniBrain::AutoDiffVar& x)
+        MiniBrain::Matrix<MiniBrain::AutoDiffVar> clampedRatio = ratio.unaryExpr([lower, upper](const MiniBrain::AutoDiffVar& x)
         {
             if (x.expr->val < lower)
             {
@@ -589,7 +589,13 @@ void AIAgent::Train(int step)
         });
         MiniBrain::Matrix<MiniBrain::AutoDiffVar> surrogate2 = clampedRatio.array() * advantage.cast<MiniBrain::AutoDiffVar>().array();
 
-        auto clipped_surrogate = surrogate1.cwiseMin(surrogate2);
+        MiniBrain::Matrix<MiniBrain::AutoDiffVar> clipped_surrogate(surrogate1.rows(), surrogate1.cols());
+        for( int index = 0; index < surrogate1.size(); ++index)
+        {
+            const auto& val1 = surrogate1(index);
+            const auto& val2 = surrogate2(index);
+            clipped_surrogate(index) = val1.expr->val < val2.expr->val ? val1 : val2;
+        }
         MiniBrain::AutoDiffVar actor_loss = -clipped_surrogate.sum() / static_cast<MiniBrain::Scalar>(m_training_data->batch_size * m_training_data->num_frames);
 
         // 更新
