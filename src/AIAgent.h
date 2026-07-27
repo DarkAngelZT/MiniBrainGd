@@ -35,6 +35,15 @@ namespace godot {
         std::unordered_map<int, int> input_mapping; // agent_id -> buffer column index        
 
         void Clear() {
+            ClearTrainingData();
+            buffer_input.setZero();
+            buffer_action.setZero();
+            buffer_q_values.setZero();
+            buffer_log_probs.setZero();            
+            input_mapping.clear();
+        }
+
+        void ClearTrainingData() {
             state.setZero();
             actions.setZero();
             rewards.setZero();
@@ -42,12 +51,7 @@ namespace godot {
             old_log_probs.setZero();
             old_critic_values.setZero();
             old_q_values.setZero();
-            buffer_input.setZero();
-            buffer_action.setZero();
-            buffer_q_values.setZero();
-            buffer_log_probs.setZero();
-            agent_write_index.clear();
-            input_mapping.clear();
+            agent_write_index.clear();            
         }
 
         void Init(int inBatch_size, int inNum_frames, int state_dim, int action_dim) {

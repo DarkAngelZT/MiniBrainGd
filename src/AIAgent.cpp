@@ -337,7 +337,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
         godot::PackedFloat32Array sample = batch_data[i];
         
         if (sample.size() != m_insize) {
-            godot::UtilityFunctions::push_error("Agent: Input sample " + godot::String::num(i) + " size mismatch!");
+            godot::UtilityFunctions::push_error("Agent: Input sample " + godot::String::num(i) + " size mismatch:" + godot::String::num(sample.size()) + " != " + godot::String::num(m_insize));
             return godot::Array();
         }        
 
@@ -357,14 +357,18 @@ godot::Array godot::AIAgent::BatchProcessSensorData(const godot::Array &batch_da
     for (int i = 0; i < batch_size; ++i) {
         //给上一个状态记录next state的q value
         int id = agent_ids[i];
-        int index = m_training_data->agent_write_index[id] - batch_size;
-        if (index < 0)
-        {
-            //这里就是直接结束，只要出现负数说明这是第一帧数据，
-            //没有上一帧需要更新next state q
-            break;
-        }
         
+        if (m_training_data->agent_write_index.count(id) == 0)
+        {
+            //这里就是直接结束，查不到说明这是第一帧数据，
+            //没有上一帧需要更新next state q
+            
+            //补上初始化
+            m_training_data->agent_write_index[id] = i;
+            continue;
+        }
+
+        int index = m_training_data->agent_write_index[id] - batch_size;
         int buffer_index = m_training_data->input_mapping[id];
         m_training_data->old_critic_values(0, index) = q(0, buffer_index).expr->val;
     }
@@ -590,6 +594,8 @@ void AIAgent::Train(int step)
         m_actor_moveNet->Update(*m_optimizer);
         m_actor_shootNet->Update(*m_optimizer);
         m_criticNet->Update(*m_optimizer);
+        //重置
+        m_training_data->ClearTrainingData();
     }
 }
 
