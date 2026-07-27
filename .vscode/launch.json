@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Attach to Godot",
+            "type": "lldb",
+            "request": "attach",
+            "pid": "${command:pickMyProcess}",
+            "sourceLanguages": [
+                "c++"
+            ],
+            "initCommands": [
+                "settings set target.inline-breakpoint-strategy always"
+            ]
+        }
+    ]
+}

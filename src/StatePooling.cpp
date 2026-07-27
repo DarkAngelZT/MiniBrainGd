@@ -2,8 +2,8 @@
 
 namespace MiniBrain {
     template<typename T>
-    StatePooling<T>::StatePooling(int inSize, int outSize)
-        : Layer<T>(inSize, outSize), m_featureDim(outSize)
+    StatePooling<T>::StatePooling(int inSize, int featureSize)
+        : Layer<T>(inSize, 2 * featureSize), m_featureDim(featureSize)
     {
         Init();
     }

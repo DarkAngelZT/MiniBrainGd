@@ -60,6 +60,25 @@ namespace MiniBrain
     }
 
     template<typename T>
+    void EmbeddingLayer<T>::Backward(T& Loss)
+    {
+        if constexpr (std::is_same_v<T, AutoDiffVar>)
+        {
+            const int weight_size = this->m_weight.size();
+            const int bias_size = this->m_bias.size();
+
+            Vector<AutoDiffVar> params(weight_size + bias_size);
+            params << this->m_weight.reshaped(), this->m_bias.reshaped();
+
+            const Eigen::VectorXf grads = autodiff::gradient(Loss, params);
+            this->m_dw = grads.head(weight_size).reshaped(
+                this->m_weight.rows(),
+                this->m_weight.cols());
+            this->m_db = grads.tail(bias_size);
+        }
+    }
+
+    template<typename T>
     std::string EmbeddingLayer<T>::GetSubType() const
     {
         return "EmbeddingLayer";

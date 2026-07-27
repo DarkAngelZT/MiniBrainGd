@@ -13,7 +13,7 @@ namespace MiniBrain {
         Eigen::MatrixXi max_indices;
         int m_featureDim;
     public:
-        StatePooling(int inSize, int outSize);
+        StatePooling(int inSize, int featureSize);
 
         virtual void Init() override;
 

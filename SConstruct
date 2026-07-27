@@ -23,6 +23,11 @@ env.Append(CPPPATH=[
 # Collects all .cpp files in the 'src' folder as compile targets.
 sources = Glob("src/*.cpp")
 
+# godot-cpp adds ".dev" to its internal suffix for dev_build=yes. The
+# GDExtension manifest uses a stable filename, so keep the final extension
+# artifact name independent from that internal build marker.
+extension_suffix = env["suffix"].replace(".dev", "")
+
 if env["platform"] == "macos":
     library = env.SharedLibrary(
         "bin/libMiniBrainGd.{}.{}.framework/libMiniBrainGd.{}.{}".format(
@@ -43,7 +48,7 @@ elif env["platform"] == "ios":
         )
 else:
     library = env.SharedLibrary(
-        "bin/libMiniBrainGd{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+        "bin/libMiniBrainGd{}{}".format(extension_suffix, env["SHLIBSUFFIX"]),
         source=sources,
     )
 

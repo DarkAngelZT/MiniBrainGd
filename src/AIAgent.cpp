@@ -56,9 +56,9 @@ void godot::AIAgent::CalculateLogProbs(
         MiniBrain::AutoDiffVar log_p_vertical = 0.0;
         MiniBrain::AutoDiffVar log_p_angle = 0.0;
 
-        MiniBrain::Scalar act_horiz = action_new(i, 0);
-        MiniBrain::Scalar act_vert  = action_new(i, 1);
-        MiniBrain::Scalar act_angle = action_new(i, 2);
+        MiniBrain::Scalar act_horiz = action_new(0, i);
+        MiniBrain::Scalar act_vert  = action_new(1, i);
+        MiniBrain::Scalar act_angle = action_new(2, i);
 
         // --- 1. 计算水平移动的 Log Prob (Categorical Softmax LogProb) ---
         if (move_rows >= 3) {
@@ -97,7 +97,7 @@ void godot::AIAgent::CalculateLogProbs(
         
         MiniBrain::AutoDiffVar std_dev = sqrt(abs(var) + 1e-6); 
         MiniBrain::AutoDiffVar angle = atan2(angleY, angleX);
-        MiniBrain::Scalar actionAngle = atan2(action_new(i, 3), action_new(i, 2));
+        MiniBrain::Scalar actionAngle = atan2(action_new(3, i), action_new(2, i));
 
         // 2. 计算动作与均值之间的初始角度差
         MiniBrain::AutoDiffVar delta_theta = MiniBrain::AutoDiffVar(actionAngle) - angle;
@@ -195,8 +195,8 @@ void AIAgent::Init(
         m_preprocessNet->AddLayer(std::make_unique<MiniBrain::EmbeddingLayer<MiniBrain::Scalar>>(input_dim, entity_feature_dim, embedding_dim));
         m_preprocessNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::Scalar>>());
         m_preprocessNet->AddLayer(std::make_unique<MiniBrain::Attention<MiniBrain::Scalar>>(n_entities * embedding_dim, n_entities * embedding_dim, embedding_dim, attention_key_dim));
-        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePooling<MiniBrain::Scalar>>(n_entities * embedding_dim, embedding_dim));
-        auto gru_layer = std::make_unique<MiniBrain::GRU<MiniBrain::Scalar>>(embedding_dim, gru_hidden_dim);
+        m_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePooling<MiniBrain::Scalar>>(n_entities * embedding_dim, embedding_dim));//注意statepool最后输出的是2*embedding, mean+max
+        auto gru_layer = std::make_unique<MiniBrain::GRU<MiniBrain::Scalar>>(embedding_dim*2, gru_hidden_dim);
         m_GRULayer = gru_layer.get();
         m_preprocessNet->AddLayer(std::move(gru_layer));
 
@@ -207,6 +207,10 @@ void AIAgent::Init(
         m_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::Scalar>>(gru_hidden_dim, out_hidden_dim));
         m_shootNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::Scalar>>());
         m_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::Scalar>>(out_hidden_dim, shoot_dim));
+
+        m_preprocessNet->Init(0.0f, 0.1f);
+        m_moveNet->Init(0.0f, 0.1f);
+        m_shootNet->Init(0.0f, 0.1f);
     }
     else 
     {
@@ -225,7 +229,7 @@ void AIAgent::Init(
         m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::AutoDiffVar>>());
         m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::Attention<MiniBrain::AutoDiffVar>>(n_entities * embedding_dim, n_entities * embedding_dim, embedding_dim, attention_key_dim));
         m_actor_preprocessNet->AddLayer(std::make_unique<MiniBrain::StatePooling<MiniBrain::AutoDiffVar>>(n_entities * embedding_dim, embedding_dim));
-        auto gru_layer_train = std::make_unique<MiniBrain::GRU<MiniBrain::AutoDiffVar>>(embedding_dim, gru_hidden_dim);
+        auto gru_layer_train = std::make_unique<MiniBrain::GRU<MiniBrain::AutoDiffVar>>(embedding_dim * 2, gru_hidden_dim);
         m_actor_GRULayer = gru_layer_train.get();
         m_actor_preprocessNet->AddLayer(std::move(gru_layer_train));
 
@@ -237,10 +241,15 @@ void AIAgent::Init(
         m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::AutoDiffVar>>());
         m_actor_shootNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(out_hidden_dim, shoot_dim));
 
-        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(embedding_dim, embedding_dim * 3));
+        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(gru_hidden_dim, gru_hidden_dim * 3));
         m_criticNet->AddLayer(std::make_unique<MiniBrain::ReLU<MiniBrain::AutoDiffVar>>());
-        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(embedding_dim * 3, 1));
+        m_criticNet->AddLayer(std::make_unique<MiniBrain::FullyConnected<MiniBrain::AutoDiffVar>>(gru_hidden_dim * 3, 1));
         m_criticNet->SetLossFunc(std::make_unique<MiniBrain::RegressionMSE>());
+
+        m_actor_preprocessNet->Init(0.0f, 0.1f);
+        m_actor_moveNet->Init(0.0f, 0.1f);
+        m_actor_shootNet->Init(0.0f, 0.1f);
+        m_criticNet->Init(0.0f, 0.1f);
     }   
 }
 

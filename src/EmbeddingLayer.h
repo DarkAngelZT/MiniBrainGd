@@ -24,6 +24,8 @@ namespace MiniBrain
 
         virtual Matrix<T> Forward(const Matrix<T>& InData) override;
 
+        virtual void Backward(T& Loss) override;
+
         virtual std::string GetSubType() const override;
     };
 }

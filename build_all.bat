@@ -22,13 +22,17 @@ if not "%~3"=="" set "JOBS=%~3"
 
 set "PATH=%LLVM_BIN%;%PATH%"
 
+set "BUILD_OPTIONS="
+if /I "%TARGET%"=="template_debug" set "BUILD_OPTIONS=dev_build=yes optimize=debug debug_symbols=yes"
+
 echo ========== Building MiniBrainGd ==========
 echo LLVM Path: %LLVM_BIN%
 echo Target: %TARGET%
 echo Jobs: %JOBS%
+echo Options: %BUILD_OPTIONS%
 echo ==========================================
 
-scons platform=windows use_llvm=yes use_mingw=yes target=%TARGET% -j%JOBS%
+scons platform=windows use_llvm=yes use_mingw=yes target=%TARGET% %BUILD_OPTIONS% -j%JOBS%
 
 if %ERRORLEVEL% equ 0 (
     echo.
