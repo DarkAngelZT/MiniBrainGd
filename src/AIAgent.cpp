@@ -598,12 +598,25 @@ void AIAgent::Train(int step)
         }
         MiniBrain::AutoDiffVar actor_loss = -clipped_surrogate.sum() / static_cast<MiniBrain::Scalar>(m_training_data->batch_size * m_training_data->num_frames);
 
-        // 更新
-        m_actor_preprocessNet->Backward(actor_loss);
-        m_actor_moveNet->Backward(actor_loss);
-        m_actor_shootNet->Backward(actor_loss);
+        // Run one reverse traversal for the complete actor graph. The three
+        // networks share the same actor loss, so invoking Network::Backward on
+        // each of them would walk that graph repeatedly. BackwardOnce packs all
+        // actor parameters, evaluates autodiff once, and routes the resulting
+        // slices back to Embedding/Attention/GRU/FullyConnected in layer order.
+        MiniBrain::BackwardOnce(
+            actor_loss,
+            *m_actor_preprocessNet,
+            *m_actor_moveNet,
+            *m_actor_shootNet);
 
-        m_criticNet->Backward(batch_new_q_values, tdTarget.cast<MiniBrain::AutoDiffVar>());
+        // The critic has one loss graph but multiple parameterized layers as
+        // well. Materialize the scalar targets once and use the same aggregated
+        // path so both FullyConnected layers are handled by one gradient call.
+        MiniBrain::Matrix<MiniBrain::AutoDiffVar> critic_targets =
+            tdTarget.cast<MiniBrain::AutoDiffVar>();
+        MiniBrain::AutoDiffVar critic_loss =
+            m_criticNet->EvaluateLoss(batch_new_q_values, critic_targets);
+        MiniBrain::BackwardOnce(critic_loss, *m_criticNet);
 
         m_actor_preprocessNet->Update(*m_optimizer);
         m_actor_moveNet->Update(*m_optimizer);
