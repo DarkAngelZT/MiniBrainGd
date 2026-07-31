@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-MiniBrainGd 是基于 MiniBrain 神经网络库的 Godot GDExtension，为游戏开发者提供集成的 AI 代理能力。支持**推理模式**（实时决策）和**训练模式**（策略学习），使用 PPO (Proximal Policy Optimization) 算法进行训练。
+MiniBrainGd 是基于 MiniMind/MNN 的 Godot GDExtension，为游戏开发者提供集成的 AI 代理能力。支持**推理模式**（实时决策）和**训练模式**（策略学习），使用 PPO (Proximal Policy Optimization) 算法进行训练。
 
 ## 功能特性
 
@@ -12,7 +12,7 @@ MiniBrainGd 是基于 MiniBrain 神经网络库的 Godot GDExtension，为游戏
 - 🤖 **神经网络架构**：支持嵌入层、注意力机制、GRU、全连接层等
 - 🎯 **双模式支持**：推理模式快速决策 + 训练模式在线学习
 - 📊 **PPO 算法**：优化的策略梯度算法，适合游戏 AI 训练
-- ⚡ **自动微分**：使用 autodiff 库进行高效的反向传播
+- ⚡ **自动微分**：使用 MNNTrain 计算图进行反向传播
 
 ## 编译与安装
 
@@ -207,17 +207,18 @@ func _process(delta):
 
 ### 保存与加载
 
-`AIAgent` 支持将网络参数保存到磁盘，也可以从磁盘重新加载。保存与加载会根据当前 `mode` 使用不同的网络对象：
+`AIAgent` 使用 MNN 原生模型格式保存和加载网络参数。保存与加载会根据当前 `mode` 使用不同的网络对象：
 
-- 推理模式 `INFERENCE`：保存/加载 `m_preprocessNet`, `m_moveNet`, `m_shootNet`
-- 训练模式 `TRAINING`：保存/加载 `m_actor_preprocessNet`, `m_actor_moveNet`, `m_actor_shootNet`
+- 推理模式 `INFERENCE`：只保存/加载 Actor
+- 训练模式 `TRAINING`：分别保存/加载 Actor 和 Critic
 
 默认参数：
 - `parent_folder = "ai"`
 - `file_name = "checkpoint"`
 
-保存与加载时会自动补全 `.param` 后缀，例如：
-- `ai/checkpoint.param`
+Actor 严格使用调用方给出的文件名；Critic 在扩展名前增加 `_critic`：
+- 文件名为 `checkpoint` 时：`ai/checkpoint`、`ai/checkpoint_critic`
+- 文件名为 `checkpoint.mnn` 时：`ai/checkpoint.mnn`、`ai/checkpoint_critic.mnn`
 
 #### 代码示例
 
@@ -324,7 +325,7 @@ Agent 通过 `agent_id` 自动维护各自的 GRU 状态和轨迹缓冲。
 
 **A**: 
 - **推理模式**：使用 `float32` 计算，快速、轻量级，不支持训练，用于游戏运行时决策
-- **训练模式**：使用自动微分变量 `AutoDiffVar`，支持反向传播，用于离线或在线学习
+- **训练模式**：开启 MNN Express 计算图，支持反向传播，用于离线或在线学习
 
 ### Q: 如何处理变长序列？
 
@@ -343,11 +344,12 @@ Agent 通过 `agent_id` 自动维护各自的 GRU 状态和轨迹缓冲。
 - `parent_folder = "ai"`
 - `file_name = "checkpoint"`
 
-保存/加载时会自动补齐 `.param` 后缀，例如 `ai/checkpoint.param`。
+Actor 使用原文件名，训练模式下的 Critic 使用同目录下的 `_critic` 文件名。例如传入
+`checkpoint.mnn` 时，对应 `checkpoint.mnn` 和 `checkpoint_critic.mnn`。
 
 注意：
-- `INFERENCE` 模式保存/加载 `m_preprocessNet`, `m_moveNet`, `m_shootNet`
-- `TRAINING` 模式保存/加载 `m_actor_preprocessNet`, `m_actor_moveNet`, `m_actor_shootNet`
+- `INFERENCE` 模式只处理 Actor 文件
+- `TRAINING` 模式同时处理 Actor 和 Critic 文件
 
 示例：
 ```gdscript
@@ -363,28 +365,22 @@ agent.Load("C:/path/to/your/project/ai", "checkpoint")
 MiniBrainGd/
 ├── src/
 │   ├── AIAgent.h/cpp         # AI 代理主类
-│   ├── EmbeddingLayer.h/cpp  # 嵌入层实现
-│   ├── StatePooling.h/cpp    # 状态池化层
+│   ├── ActorNet.h/cpp        # MNN Actor 网络
+│   ├── CriticNet.h/cpp       # MNN Critic 网络
 │   └── register_types.h/cpp  # Godot 注册
-├── MiniBrain/                # 神经网络核心库
-│   ├── Source/
-│   │   ├── Activations/      # 激活函数
-│   │   ├── Layers/           # 网络层
-│   │   ├── LossFunc/         # 损失函数
-│   │   └── ...
-│   └── Eigen/                # 第三方库
+├── MiniMind/                 # 基于 MNN 的游戏神经网络扩展层
 ├── godot-cpp/                # Godot C++ 绑定
-├── MiniBrainGd.gdextension  # GDExtension 清单
-└── SConstruct                # 构建脚本
+├── tests/                    # 独立单元测试与集成测试
+├── MiniBrainGd.gdextension   # GDExtension 清单
+└── SConstruct                # 插件构建脚本
 ```
 
 ## 技术栈
 
 - **Godot**: 4.5 GDExtension API
-- **C++**: 17 标准
-- **线性代数**: Eigen 3.4.1
-- **自动微分**: autodiff 库
-- **算法**: PPO, Adam 优化器
+- **C++**: C++17
+- **神经网络运行时**: MNN Express / MNNTrain
+- **算法**: PPO、Adam
 
 ## 许可证
 

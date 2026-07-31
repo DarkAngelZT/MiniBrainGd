@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -o errexit -o nounset -o pipefail
 
-# build_all.sh
-# Usage: build_all.sh [target] [jobs]
-# Example: ./build_all.sh template_debug 8
+# 用法：./build_all.sh [target] [jobs]
+# 示例：./build_all.sh template_debug 8
 
 cd "$(dirname "$0")"
 
@@ -18,18 +17,10 @@ echo "========== Building MiniBrainGd (Linux) =========="
 echo "Target: ${TARGET}"
 echo "Jobs: ${JOBS}"
 echo "Options: ${BUILD_OPTIONS[*]:-(release defaults)}"
-echo "==============================================="
+echo "=================================================="
 
-# Invoke SCons to build for Linux. On Linux we assume clang/llvm is
-# available in PATH, so we don't require a manual LLVM path input.
+# 主 SConstruct 会先增量构建 MiniMind 和 MNN，再链接 GDExtension。
 scons platform=linux use_llvm=yes target="${TARGET}" "${BUILD_OPTIONS[@]}" -j"${JOBS}"
 
-if [ $? -eq 0 ]; then
-    echo
-    echo "Build Success! Output in bin folder."
-    exit 0
-else
-    echo
-    echo "Build Failed! Check SCons output above."
-    exit 1
-fi
+echo
+echo "Build Success! Output in bin folder."

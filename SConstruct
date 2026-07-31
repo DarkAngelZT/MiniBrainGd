@@ -1,31 +1,20 @@
 #!/usr/bin/env python
-import os
-import sys
 
-# You can find documentation for SCons and SConstruct files at:
-# https://scons.org/documentation.html
-
-# This lets SCons know that we're using godot-cpp, from the godot-cpp folder.
+# 依次加载 godot-cpp 和 MiniMind，各依赖库自行封装构建细节。
 env = SConscript("godot-cpp/SConstruct")
+minimind_build = SConscript("MiniMind/SConscript", exports={"env": env})
 
-# Configure include search paths to match VS Code's c_cpp_properties.json, using relative workspace paths.
-# LLVM include paths are not needed here, only project headers.
 env.Append(CPPPATH=[
     "src",
-    "MiniBrain/Source",
-    "MiniBrain/Source/ThirdParty",
     "godot-cpp/include",
     "godot-cpp/gen/include",
     "godot-cpp/include/godot_cpp/core",
     ".",
 ])
 
-# Collects all .cpp files in the 'src' folder as compile targets.
 sources = Glob("src/*.cpp")
 
-# godot-cpp adds ".dev" to its internal suffix for dev_build=yes. The
-# GDExtension manifest uses a stable filename, so keep the final extension
-# artifact name independent from that internal build marker.
+# GDExtension 清单使用稳定文件名，不继承 godot-cpp 的“.dev”内部标记。
 extension_suffix = env["suffix"].replace(".dev", "")
 
 if env["platform"] == "macos":
@@ -38,7 +27,9 @@ if env["platform"] == "macos":
 elif env["platform"] == "ios":
     if env["ios_simulator"]:
         library = env.StaticLibrary(
-            "bin/libMiniBrainGd.{}.{}.simulator.a".format(env["platform"], env["target"]),
+            "bin/libMiniBrainGd.{}.{}.simulator.a".format(
+                env["platform"], env["target"]
+            ),
             source=sources,
         )
     else:
@@ -52,5 +43,7 @@ else:
         source=sources,
     )
 
-# Selects the shared library as the default target.
+# 插件链接等待 MiniMind 入口返回的构建节点。
+env.Depends(library, minimind_build)
+
 Default(library)

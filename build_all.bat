@@ -1,11 +1,10 @@
 @echo off
 cls
 cd /d "%~dp0"
-setlocal enabledelayedexpansion
+setlocal
 
-:: Usage: build_all.bat LLVM_BIN_PATH [target] [jobs]
-:: Example 1 (Dev): build_all.bat D:\llvm-mingw\bin template_debug
-:: Example 2 (Release): build_all.bat D:\llvm-mingw\bin template_release 8
+:: 用法：build_all.bat LLVM_BIN_PATH [target] [jobs]
+:: 示例：build_all.bat D:\llvm-mingw\bin template_debug 8
 
 if "%~1"=="" (
     echo ERROR: Please input llvm-mingw bin path!
@@ -22,17 +21,13 @@ if not "%~3"=="" set "JOBS=%~3"
 
 set "PATH=%LLVM_BIN%;%PATH%"
 
-@REM set "BUILD_OPTIONS="
-@REM if /I "%TARGET%"=="template_debug" set "BUILD_OPTIONS=dev_build=yes optimize=debug debug_symbols=yes"
-
 echo ========== Building MiniBrainGd ==========
 echo LLVM Path: %LLVM_BIN%
 echo Target: %TARGET%
 echo Jobs: %JOBS%
-@REM echo Options: %BUILD_OPTIONS%
 echo ==========================================
 
-@REM scons platform=windows use_llvm=yes use_mingw=yes target=%TARGET% %BUILD_OPTIONS% -j%JOBS%
+:: 主 SConstruct 会先增量构建 MiniMind 和 MNN，再链接 GDExtension。
 scons platform=windows use_llvm=yes use_mingw=yes target=%TARGET% -j%JOBS%
 
 if %ERRORLEVEL% equ 0 (

@@ -19,6 +19,8 @@ namespace MiniMind {
         int m_hidden_size = 0;
 
         MNN::Express::VARP m_fc;
+        MNN::Express::VARP m_fc_bias;
         MNN::Express::VARP m_fc_out;
+        MNN::Express::VARP m_fc_out_bias;
     };
 } // namespace MiniMind

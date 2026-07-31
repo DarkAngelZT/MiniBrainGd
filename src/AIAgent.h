@@ -5,71 +5,92 @@
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/core/binder_common.hpp>
 #include <godot_cpp/core/gdvirtual.gen.inc>
+#include <MNN/expr/ExprCreator.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 
-#include "../MiniBrain/Source/MiniBrain.h"
+#include "ActorNet.h"
+#include "CriticNet.h"
+
+namespace MNN::Train { class ParameterOptimizer; }
 
 namespace godot {
 
     struct TrainingData {
-        MiniBrain::Matrix<MiniBrain::Scalar> state;
-        MiniBrain::Matrix<MiniBrain::Scalar> actions;
-        MiniBrain::Matrix<MiniBrain::Scalar> rewards;
-        MiniBrain::Matrix<MiniBrain::Scalar> done;
+        MNN::Express::VARP state;
+        MNN::Express::VARP actions;
+        MNN::Express::VARP rewards;
+        MNN::Express::VARP done;
 
-        MiniBrain::Matrix<MiniBrain::Scalar> old_log_probs;
-        MiniBrain::Matrix<MiniBrain::Scalar> old_critic_values;//q value for next state
-        MiniBrain::Matrix<MiniBrain::Scalar> old_q_values;//q value of current state
+        MNN::Express::VARP old_log_probs;
+        MNN::Express::VARP old_critic_values; // 下一状态的Q值
+        MNN::Express::VARP old_q_values; // 当前状态的Q值
 
-        std::unordered_map<int, int> agent_write_index; // agent_id -> current write index
+        std::unordered_map<int, int> agent_write_index; // 智能体编号到当前写入位置
         int batch_size = 0;
         int num_frames = 1;
+        int entity_num = 0;
+        int feature_dim = 0;
         int action_dim = 0;
 
-        MiniBrain::Matrix<MiniBrain::Scalar> buffer_input;
-        MiniBrain::Matrix<MiniBrain::Scalar> buffer_action;
-        MiniBrain::Matrix<MiniBrain::Scalar> buffer_log_probs;
-        MiniBrain::Matrix<MiniBrain::Scalar> buffer_q_values;
-        std::unordered_map<int, int> input_mapping; // agent_id -> buffer column index        
+        MNN::Express::VARP buffer_input;
+        MNN::Express::VARP buffer_action;
+        MNN::Express::VARP buffer_log_probs;
+        MNN::Express::VARP buffer_q_values;
+        std::unordered_map<int, int> input_mapping; // 智能体编号到当前批次位置
+
+        static void SetZero(const MNN::Express::VARP &tensor) {
+            if (tensor == nullptr || tensor->getInfo() == nullptr) {
+                return;
+            }
+            float *data = tensor->writeMap<float>();
+            std::fill(data, data + tensor->getInfo()->size, 0.0f);
+        }
 
         void Clear() {
             ClearTrainingData();
-            buffer_input.setZero();
-            buffer_action.setZero();
-            buffer_q_values.setZero();
-            buffer_log_probs.setZero();            
+            SetZero(buffer_input);
+            SetZero(buffer_action);
+            SetZero(buffer_q_values);
+            SetZero(buffer_log_probs);
             input_mapping.clear();
         }
 
         void ClearTrainingData() {
-            state.setZero();
-            actions.setZero();
-            rewards.setZero();
-            done.setZero();
-            old_log_probs.setZero();
-            old_critic_values.setZero();
-            old_q_values.setZero();
-            agent_write_index.clear();            
+            SetZero(state);
+            SetZero(actions);
+            SetZero(rewards);
+            SetZero(done);
+            SetZero(old_log_probs);
+            SetZero(old_critic_values);
+            SetZero(old_q_values);
+            agent_write_index.clear();
         }
 
-        void Init(int inBatch_size, int inNum_frames, int state_dim, int action_dim) {
+        void Init(int inBatch_size, int inNum_frames, int inEntity_num, int inFeature_dim, int inAction_dim) {
             this->batch_size = inBatch_size;
             this->num_frames = inNum_frames;
-            this->action_dim = action_dim;
-            state.resize(state_dim, inBatch_size*num_frames);
-            actions.resize(action_dim, inBatch_size*num_frames);
-            rewards.resize(1, inBatch_size*num_frames);
-            done.resize(1, inBatch_size*num_frames);
-            old_critic_values.resize(1, inBatch_size*num_frames);
-            old_log_probs.resize(1, inBatch_size*num_frames);
-            old_q_values.resize(1, inBatch_size*num_frames);
+            this->entity_num = inEntity_num;
+            this->feature_dim = inFeature_dim;
+            this->action_dim = inAction_dim;
 
-            buffer_input.resize(state_dim, inBatch_size);
-            buffer_action.resize(action_dim, inBatch_size);
-            buffer_log_probs.resize(1, inBatch_size);
-            buffer_q_values.resize(1, inBatch_size);
+            // 帧数据在首维连续存放，每一批取出后仍是[batch, entity, feature]。
+            const int sample_capacity = inBatch_size * inNum_frames;
+            state = MNN::Express::_Input({sample_capacity, inEntity_num, inFeature_dim}, MNN::Express::NCHW);
+            actions = MNN::Express::_Input({sample_capacity, inAction_dim}, MNN::Express::NCHW);
+            rewards = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
+            done = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
+            old_critic_values = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
+            old_log_probs = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
+            old_q_values = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
+
+            buffer_input = MNN::Express::_Input({inBatch_size, inEntity_num, inFeature_dim}, MNN::Express::NCHW);
+            buffer_action = MNN::Express::_Input({inBatch_size, inAction_dim}, MNN::Express::NCHW);
+            buffer_log_probs = MNN::Express::_Input({inBatch_size, 1}, MNN::Express::NCHW);
+            buffer_q_values = MNN::Express::_Input({inBatch_size, 1}, MNN::Express::NCHW);
+            Clear();
         }
     };
 
@@ -84,47 +105,41 @@ protected:
     static void _bind_methods();
     AIAgentMode mode;
     int m_insize,m_outSize;
+    int m_entityNum = 0;
+    int m_entityFeatureDim = 0;
 
-    //推理模式用这个
-    MiniBrain::Network<MiniBrain::Scalar> *m_preprocessNet = nullptr;
-    MiniBrain::Network<MiniBrain::Scalar> *m_moveNet = nullptr;
-    MiniBrain::Network<MiniBrain::Scalar> *m_shootNet = nullptr;
+    // Actor 在推理和训练模式下共用，Critic 仅在训练模式下创建。
+    MiniMind::ActorNet *m_mnnActorNet = nullptr;
+    MiniMind::CriticNet *m_mnnCriticNet = nullptr;
 
-    MiniBrain::GRU<MiniBrain::Scalar>* m_GRULayer = nullptr;
-    //训练模式用这个
-    MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_preprocessNet = nullptr;
-    MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_moveNet = nullptr;
-    MiniBrain::Network<MiniBrain::AutoDiffVar> *m_actor_shootNet = nullptr;
-    MiniBrain::GRU<MiniBrain::AutoDiffVar>* m_actor_GRULayer = nullptr;
-
-    MiniBrain::Network<MiniBrain::AutoDiffVar> *m_criticNet = nullptr;
-    
     std::shared_ptr<TrainingData> m_training_data;
-    std::shared_ptr<MiniBrain::Adam> m_optimizer;
+    std::shared_ptr<MNN::Train::ParameterOptimizer> m_actor_optimizer;
+    std::shared_ptr<MNN::Train::ParameterOptimizer> m_critic_optimizer;
 
     float m_gamma = 0.93f;
     float m_lambda = 0.9f;
     float m_clip_epsilon = 0.2f;
     float m_continuous_gamma = 0.9f;
 
-    void CalculateLogProbs(
-        const MiniBrain::Matrix<MiniBrain::Scalar> &action_new, 
-        const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &moveData, 
-        const MiniBrain::Matrix<MiniBrain::AutoDiffVar> &shootData,
-        MiniBrain::Matrix<MiniBrain::AutoDiffVar> &log_probs);
+    MNN::Express::VARP CalculateLogProbs(
+        const MNN::Express::VARP &actions,
+        const MNN::Express::VARP &move_data,
+        const MNN::Express::VARP &shoot_data);
 
-    void ComputeAdvantage(
-        const MiniBrain::Matrix<MiniBrain::Scalar> &inTdDelta,
-        float gamma, float lambda,
-        MiniBrain::Matrix<MiniBrain::Scalar>& outAdvantage);
+    MNN::Express::VARP ComputeAdvantage(
+        const MNN::Express::VARP &td_delta,
+        const MNN::Express::VARP &done,
+        float gamma, float lambda);
+
+    void UpdateActorNetTrainingMode();
 public:
     AIAgent();  // 无参构造函数供Godot使用
     AIAgent(AIAgentMode mode);
     ~AIAgent();
 
     void Init(
-        int input_dim, int move_dim, int shoot_dim,
-        int entity_feature_dim, int embedding_dim=16, int attention_key_dim=16, int gru_hidden_dim = 128,
+        int entity_num, int feature_dim, int move_dim, int shoot_dim,
+        int embedding_dim=16, int attention_key_dim=16, int gru_hidden_dim = 128,
         int out_hidden_dim = 128);
 
     AIAgentMode get_mode() const;
@@ -145,7 +160,7 @@ public:
     void Save(const godot::String &parent_folder = godot::String("ai"), const godot::String &file_name = godot::String("checkpoint"));
     void Load(const godot::String &parent_folder = godot::String("ai"), const godot::String &file_name = godot::String("checkpoint"));
 
-    
+
 };
 
 } // namespace godot
