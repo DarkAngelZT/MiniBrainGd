@@ -39,6 +39,11 @@ void AIAgent::_bind_methods()
 }
 
 namespace {
+String Utf8(const char *text)
+{
+    return String::utf8(text);
+}
+
 MNN::Express::VARP Slice2D(
     const MNN::Express::VARP &value,
     int row_start, int column_start, int row_count, int column_count)
@@ -81,7 +86,7 @@ MNN::Express::VARP godot::AIAgent::CalculateLogProbs(
 {
     using namespace MNN::Express;
     if (actions == nullptr || move_data == nullptr || shoot_data == nullptr) {
-        UtilityFunctions::push_error("CalculateLogProbs：输入不能为空。");
+        UtilityFunctions::push_error(Utf8("CalculateLogProbs：输入不能为空。"));
         return nullptr;
     }
     const auto *action_info = actions->getInfo();
@@ -92,7 +97,7 @@ MNN::Express::VARP godot::AIAgent::CalculateLogProbs(
         shoot_info->dim.size() != 2 || action_info->dim[0] != move_info->dim[0] ||
         action_info->dim[0] != shoot_info->dim[0] || action_info->dim[1] < 4 ||
         move_info->dim[1] < 6 || shoot_info->dim[1] < 3) {
-        UtilityFunctions::push_error("CalculateLogProbs：输入形状不匹配。");
+        UtilityFunctions::push_error(Utf8("CalculateLogProbs：输入形状不匹配。"));
         return nullptr;
     }
     const int batch_size = action_info->dim[0];
@@ -141,7 +146,7 @@ MNN::Express::VARP godot::AIAgent::ComputeAdvantage(
     float gamma, float lambda)
 {
     if (td_delta == nullptr || done == nullptr) {
-        UtilityFunctions::push_error("ComputeAdvantage：输入不能为空。");
+        UtilityFunctions::push_error(Utf8("ComputeAdvantage：输入不能为空。"));
         return nullptr;
     }
     const auto *delta_info = td_delta->getInfo();
@@ -149,7 +154,7 @@ MNN::Express::VARP godot::AIAgent::ComputeAdvantage(
     if (delta_info == nullptr || done_info == nullptr ||
         delta_info->dim != done_info->dim || delta_info->dim.size() != 2 ||
         delta_info->dim[1] != 1) {
-        UtilityFunctions::push_error("ComputeAdvantage：输入必须为单个智能体的[frames,1]。");
+        UtilityFunctions::push_error(Utf8("ComputeAdvantage：输入必须为单个智能体的[frames,1]。"));
         return nullptr;
     }
 
@@ -194,7 +199,7 @@ godot::AIAgent::AIAgentMode AIAgent::get_mode() const {
 void godot::AIAgent::set_mode(godot::AIAgent::AIAgentMode inMode)
 {
     if (inMode != AIAgentMode::INFERENCE && inMode != AIAgentMode::TRAINING) {
-        UtilityFunctions::push_error("AIAgent.set_mode：mode取值无效。");
+        UtilityFunctions::push_error(Utf8("AIAgent.set_mode：mode取值无效。"));
         return;
     }
     mode = inMode;
@@ -232,7 +237,7 @@ void AIAgent::Init(
         shoot_dim < 4 || embedding_dim <= 0 || attention_key_dim <= 0 ||
         gru_hidden_dim <= 0 || out_hidden_dim <= 0) {
         UtilityFunctions::push_error(
-            "AIAgent.Init：维度必须为正数，move_dim至少为6，shoot_dim至少为4。");
+            Utf8("AIAgent.Init：维度必须为正数，move_dim至少为6，shoot_dim至少为4。"));
         return;
     }
 
@@ -271,12 +276,12 @@ PackedFloat32Array AIAgent::ProcessSensorData(
 {
     PackedFloat32Array output;
     if (m_mnnActorNet == nullptr) {
-        UtilityFunctions::push_error("AIAgent.ProcessSensorData：Actor 尚未初始化。");
+        UtilityFunctions::push_error(Utf8("AIAgent.ProcessSensorData：Actor 尚未初始化。"));
         return output;
     }
     if (input.size() != m_insize) {
         UtilityFunctions::push_error(
-            "AIAgent.ProcessSensorData：输入长度必须等于 entity_num*feature_dim。");
+            Utf8("AIAgent.ProcessSensorData：输入长度必须等于 entity_num*feature_dim。"));
         return output;
     }
 
@@ -286,18 +291,18 @@ PackedFloat32Array AIAgent::ProcessSensorData(
     if (!CopyFlattenedState(input, m_entityNum, m_entityFeatureDim,
                             state->writeMap<float>())) {
         UtilityFunctions::push_error(
-            "AIAgent.ProcessSensorData：输入必须是按实体连续拼接的 [entity*feature] 向量。");
+            Utf8("AIAgent.ProcessSensorData：输入必须是按实体连续拼接的 [entity*feature] 向量。"));
         return output;
     }
     const auto result = m_mnnActorNet->onForward({state});
     if (result.size() != 3 || result[0] == nullptr || result[1] == nullptr) {
-        UtilityFunctions::push_error("AIAgent.ProcessSensorData：Actor前向计算失败。");
+        UtilityFunctions::push_error(Utf8("AIAgent.ProcessSensorData：Actor前向计算失败。"));
         return output;
     }
     const float *move = result[0]->readMap<float>();
     const float *shoot = result[1]->readMap<float>();
     if (move == nullptr || shoot == nullptr) {
-        UtilityFunctions::push_error("AIAgent.ProcessSensorData：Actor输出读取失败。");
+        UtilityFunctions::push_error(Utf8("AIAgent.ProcessSensorData：Actor输出读取失败。"));
         return output;
     }
 
@@ -347,7 +352,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
         m_training_data->buffer_log_probs == nullptr ||
         m_training_data->buffer_q_values == nullptr) {
         UtilityFunctions::push_error(
-            "AIAgent.BatchProcessSensorData：请先调用SetBatchInfo。");
+            Utf8("AIAgent.BatchProcessSensorData：请先调用SetBatchInfo。"));
         return result_array;
     }
     if (batch_data.size() == 0 || agent_ids.size() != batch_data.size()) {
@@ -369,18 +374,18 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
         const Variant sample_variant = batch_data[batch];
         if (sample_variant.get_type() != Variant::PACKED_FLOAT32_ARRAY) {
             UtilityFunctions::push_error(
-                "AIAgent.BatchProcessSensorData：batch 中的每个样本都必须是 PackedFloat32Array。");
+                Utf8("AIAgent.BatchProcessSensorData：batch 中的每个样本都必须是 PackedFloat32Array。"));
             return godot::Array();
         }
         const PackedFloat32Array sample = sample_variant;
         if (sample.size() != m_insize) {
             UtilityFunctions::push_error(
-                "AIAgent.BatchProcessSensorData：每个样本必须包含 entity_num*feature_dim 个数值。");
+                Utf8("AIAgent.BatchProcessSensorData：每个样本必须包含 entity_num*feature_dim 个数值。"));
             return godot::Array();
         }
         if (!unique_agent_ids.insert(agent_ids[batch]).second) {
             UtilityFunctions::push_error(
-                "AIAgent.BatchProcessSensorData：同一 batch 中的 agent_id 不能重复。");
+                Utf8("AIAgent.BatchProcessSensorData：同一 batch 中的 agent_id 不能重复。"));
             return godot::Array();
         }
         samples.push_back(sample);
@@ -396,7 +401,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
                                 m_entityFeatureDim,
                                 state_data + batch * m_insize)) {
             UtilityFunctions::push_error(
-                "AIAgent.BatchProcessSensorData：样本布局转换失败。");
+                Utf8("AIAgent.BatchProcessSensorData：样本布局转换失败。"));
             return godot::Array();
         }
         m_training_data->input_mapping[agent_ids[batch]] = batch;
@@ -409,7 +414,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
     const auto outputs = m_mnnActorNet->onForward({state});
     if (outputs.size() != 3 || outputs[0] == nullptr ||
         outputs[1] == nullptr || outputs[2] == nullptr) {
-        UtilityFunctions::push_error("AIAgent.BatchProcessSensorData：Actor前向计算失败。");
+        UtilityFunctions::push_error(Utf8("AIAgent.BatchProcessSensorData：Actor前向计算失败。"));
         return godot::Array();
     }
     const float *move = outputs[0]->readMap<float>();
@@ -417,13 +422,13 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
     const auto critic_outputs = m_mnnCriticNet->onForward({outputs[2]});
     if (critic_outputs.size() != 1 || critic_outputs[0] == nullptr ||
         move == nullptr || shoot == nullptr) {
-        UtilityFunctions::push_error("AIAgent.BatchProcessSensorData：网络输出无效。");
+        UtilityFunctions::push_error(Utf8("AIAgent.BatchProcessSensorData：网络输出无效。"));
         return godot::Array();
     }
     const auto critic_output = critic_outputs[0];
     const float *critic = critic_output->readMap<float>();
     if (critic == nullptr) {
-        UtilityFunctions::push_error("AIAgent.BatchProcessSensorData：Critic输出读取失败。");
+        UtilityFunctions::push_error(Utf8("AIAgent.BatchProcessSensorData：Critic输出读取失败。"));
         return godot::Array();
     }
     std::copy(critic, critic + batch_size,
@@ -520,7 +525,7 @@ void AIAgent::PushTrainingData(
         m_training_data->buffer_action == nullptr ||
         m_training_data->buffer_log_probs == nullptr ||
         m_training_data->buffer_q_values == nullptr) {
-        UtilityFunctions::push_error("AIAgent.PushTrainingData：请先调用SetBatchInfo。");
+        UtilityFunctions::push_error(Utf8("AIAgent.PushTrainingData：请先调用SetBatchInfo。"));
         return;
     }
     if (batch_rewards.size() == 0 || agent_ids.size() != batch_rewards.size() ||
@@ -530,7 +535,7 @@ void AIAgent::PushTrainingData(
     }
     if (batch_rewards.size() > m_training_data->batch_size) {
         UtilityFunctions::push_error(
-            "AIAgent.PushTrainingData：当前 batch 超过 SetBatchInfo 配置的容量。");
+            Utf8("AIAgent.PushTrainingData：当前 batch 超过 SetBatchInfo 配置的容量。"));
         return;
     }
 
@@ -540,7 +545,7 @@ void AIAgent::PushTrainingData(
         const int id = agent_ids[batch];
         if (!unique_agent_ids.insert(id).second) {
             UtilityFunctions::push_error(
-                "AIAgent.PushTrainingData：同一 batch 中的 agent_id 不能重复。");
+                Utf8("AIAgent.PushTrainingData：同一 batch 中的 agent_id 不能重复。"));
             return;
         }
         const auto write_it = m_training_data->agent_write_index.find(id);
@@ -548,7 +553,7 @@ void AIAgent::PushTrainingData(
         if (write_it == m_training_data->agent_write_index.end() ||
             input_it == m_training_data->input_mapping.end()) {
             UtilityFunctions::push_error(
-                "AIAgent.PushTrainingData：训练数据与上一批前向结果的 agent_id 不匹配。");
+                Utf8("AIAgent.PushTrainingData：训练数据与上一批前向结果的 agent_id 不匹配。"));
             return;
         }
         const int sample_capacity =
@@ -557,7 +562,7 @@ void AIAgent::PushTrainingData(
             input_it->second < 0 ||
             input_it->second >= m_training_data->batch_size) {
             UtilityFunctions::push_error(
-                "AIAgent.PushTrainingData：训练帧下标超出已配置容量。");
+                Utf8("AIAgent.PushTrainingData：训练帧下标超出已配置容量。"));
             return;
         }
     }
@@ -603,11 +608,11 @@ void AIAgent::Train(int step)
     if (mode != AIAgentMode::TRAINING || m_training_data == nullptr ||
         m_mnnActorNet == nullptr || m_mnnCriticNet == nullptr ||
         m_actor_optimizer == nullptr || m_critic_optimizer == nullptr) {
-        UtilityFunctions::push_error("AIAgent.Train：训练网络尚未初始化。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Train：训练网络尚未初始化。"));
         return;
     }
     if (step <= 0) {
-        UtilityFunctions::push_error("AIAgent.Train：step必须为正整数。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Train：step必须为正整数。"));
         return;
     }
     if (m_training_data->state == nullptr ||
@@ -617,7 +622,7 @@ void AIAgent::Train(int step)
         m_training_data->old_log_probs == nullptr ||
         m_training_data->old_critic_values == nullptr ||
         m_training_data->old_q_values == nullptr) {
-        UtilityFunctions::push_error("AIAgent.Train：请先调用SetBatchInfo并写入训练数据。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Train：请先调用SetBatchInfo并写入训练数据。"));
         return;
     }
     using namespace MNN::Express;
@@ -711,14 +716,14 @@ void godot::AIAgent::SetBatchInfo(int batch_size, int action_dim, int num_frames
 {
     if (batch_size <= 0 || num_frames <= 0 || action_dim != 5) {
         UtilityFunctions::push_error(
-            "AIAgent.SetBatchInfo：batch_size和num_frames必须为正数，action_dim必须为5。");
+            Utf8("AIAgent.SetBatchInfo：batch_size和num_frames必须为正数，action_dim必须为5。"));
         return;
     }
     if (mode == AIAgentMode::TRAINING && m_training_data != nullptr) {
         m_training_data->Init(
             batch_size, num_frames, m_entityNum, m_entityFeatureDim, action_dim);
     } else if (mode == AIAgentMode::TRAINING) {
-        UtilityFunctions::push_error("AIAgent.SetBatchInfo：请先调用Init初始化训练网络。");
+        UtilityFunctions::push_error(Utf8("AIAgent.SetBatchInfo：请先调用Init初始化训练网络。"));
         return;
     }
     if (m_mnnActorNet != nullptr) {
@@ -731,7 +736,7 @@ void godot::AIAgent::SetLearningParameters(
 {
     if (gamma < 0.0f || lambda < 0.0f || lambda > 1.0f ||
         clip_epsilon < 0.0f || continuous_gamma < 0.0f) {
-        UtilityFunctions::push_error("AIAgent.SetLearningParameters：学习参数超出有效范围。");
+        UtilityFunctions::push_error(Utf8("AIAgent.SetLearningParameters：学习参数超出有效范围。"));
         return;
     }
     m_gamma = gamma;
@@ -860,23 +865,23 @@ void godot::AIAgent::Save(
     const godot::String &parent_folder, const godot::String &file_name)
 {
     if (m_mnnActorNet == nullptr) {
-        UtilityFunctions::push_error("AIAgent.Save：网络尚未初始化。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Save：网络尚未初始化。"));
         return;
     }
     if (mode == AIAgentMode::TRAINING && m_mnnCriticNet == nullptr) {
-        UtilityFunctions::push_error("AIAgent.Save：训练模式下 Critic 尚未初始化。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Save：训练模式下 Critic 尚未初始化。"));
         return;
     }
 
     const String actor_name = MakeActorModelName(file_name);
     if (actor_name.is_empty()) {
-        UtilityFunctions::push_error("AIAgent.Save：模型文件名不能为空。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Save：模型文件名不能为空。"));
         return;
     }
     const String actor_path = MakeModelPath(parent_folder, actor_name);
     if (!SaveModuleParameters(actor_path, m_mnnActorNet)) {
         UtilityFunctions::push_error(
-            "AIAgent.Save：Actor MNN 模型保存失败：" + actor_path);
+            Utf8("AIAgent.Save：Actor MNN 模型保存失败：") + actor_path);
         return;
     }
 
@@ -885,7 +890,7 @@ void godot::AIAgent::Save(
             parent_folder, MakeCriticModelName(actor_name));
         if (!SaveModuleParameters(critic_path, m_mnnCriticNet)) {
             UtilityFunctions::push_error(
-                "AIAgent.Save：Critic MNN 模型保存失败：" + critic_path);
+                Utf8("AIAgent.Save：Critic MNN 模型保存失败：") + critic_path);
         }
     }
 }
@@ -894,23 +899,23 @@ void godot::AIAgent::Load(
     const godot::String &parent_folder, const godot::String &file_name)
 {
     if (m_mnnActorNet == nullptr) {
-        UtilityFunctions::push_error("AIAgent.Load：网络尚未初始化。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Load：网络尚未初始化。"));
         return;
     }
     if (mode == AIAgentMode::TRAINING && m_mnnCriticNet == nullptr) {
-        UtilityFunctions::push_error("AIAgent.Load：训练模式下 Critic 尚未初始化。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Load：训练模式下 Critic 尚未初始化。"));
         return;
     }
 
     const String actor_name = MakeActorModelName(file_name);
     if (actor_name.is_empty()) {
-        UtilityFunctions::push_error("AIAgent.Load：模型文件名不能为空。");
+        UtilityFunctions::push_error(Utf8("AIAgent.Load：模型文件名不能为空。"));
         return;
     }
     const String actor_path = MakeModelPath(parent_folder, actor_name);
     if (!LoadModuleParameters(actor_path, m_mnnActorNet)) {
         UtilityFunctions::push_error(
-            "AIAgent.Load：Actor MNN 模型读取或参数匹配失败：" + actor_path);
+            Utf8("AIAgent.Load：Actor MNN 模型读取或参数匹配失败：") + actor_path);
         return;
     }
 
@@ -919,7 +924,7 @@ void godot::AIAgent::Load(
             parent_folder, MakeCriticModelName(actor_name));
         if (!LoadModuleParameters(critic_path, m_mnnCriticNet)) {
             UtilityFunctions::push_error(
-                "AIAgent.Load：Critic MNN 模型读取或参数匹配失败：" + critic_path);
+                Utf8("AIAgent.Load：Critic MNN 模型读取或参数匹配失败：") + critic_path);
             return;
         }
     }
