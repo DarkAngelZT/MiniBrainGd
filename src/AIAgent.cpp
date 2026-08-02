@@ -77,6 +77,27 @@ bool CopyFlattenedState(
     }
     return true;
 }
+
+MNN::Express::VARP log_sigmoid(const MNN::Express::VARP &x) {
+    using namespace MNN::Express;
+     // 构造常数 1
+    auto one = _Const(1.0f);
+
+    // 分支1：当 x >= 0 时，使用 -log(1 + exp(-x))
+    auto exp_neg = _Exp(-x);
+    auto log1p_neg = _Log(one + exp_neg);   // log(1 + exp(-x))
+    auto part1 = -log1p_neg;
+
+    // 分支2：当 x < 0 时，使用 x - log(1 + exp(x))
+    auto exp_pos = _Exp(x);
+    auto log1p_pos = _Log(one + exp_pos);   // log(1 + exp(x))
+    auto part2 = x - log1p_pos;
+
+    // 根据 x 的正负选择合适的分支 (x >= 0 选 part1, 否则 part2)
+    auto condition = _Greater(x, _Const(0.0f));  // 这里用 >0，等于0走part2，结果一致
+    return _Select(condition, part1, part2);
+}
+
 }
 
 MNN::Express::VARP godot::AIAgent::CalculateLogProbs(
@@ -136,8 +157,11 @@ MNN::Express::VARP godot::AIAgent::CalculateLogProbs(
         - _Log(standard_deviation)
         - _Scalar<float>(0.9189385332046727f);
 
+    const auto shoot_logit = Slice2D(shoot_data, 0, 3, batch_size, 1);
+    const auto log_shoot = log_sigmoid(shoot_logit);
+
     return horizontal_log_probability + vertical_log_probability
-        + angle_log_probability;
+        + angle_log_probability + log_shoot;
 }
 
 MNN::Express::VARP godot::AIAgent::ComputeAdvantage(
@@ -492,13 +516,14 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
             angle_y = 0.0f;
         }
         const float shoot_probability = 1.0f / (1.0f + std::exp(-shoot_row[3]));
+        std::bernoulli_distribution shoot_bernoulli(shoot_probability);
         PackedFloat32Array action;
         action.resize(5);
         action[0] = horizontal;
         action[1] = vertical;
         action[2] = angle_x;
         action[3] = angle_y;
-        action[4] = shoot_probability > 0.5f ? 1.0f : 0.0f;
+        action[4] = shoot_bernoulli(generator) ? 1.0f : 0.0f;
         result_array[batch] = action;
     }
     return result_array;
