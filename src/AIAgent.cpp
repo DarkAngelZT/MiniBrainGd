@@ -80,22 +80,12 @@ bool CopyFlattenedState(
 
 MNN::Express::VARP log_sigmoid(const MNN::Express::VARP &x) {
     using namespace MNN::Express;
-     // 构造常数 1
-    auto one = _Const(1.0f);
-
-    // 分支1：当 x >= 0 时，使用 -log(1 + exp(-x))
-    auto exp_neg = _Exp(-x);
-    auto log1p_neg = _Log(one + exp_neg);   // log(1 + exp(-x))
-    auto part1 = -log1p_neg;
-
-    // 分支2：当 x < 0 时，使用 x - log(1 + exp(x))
-    auto exp_pos = _Exp(x);
-    auto log1p_pos = _Log(one + exp_pos);   // log(1 + exp(x))
-    auto part2 = x - log1p_pos;
-
-    // 根据 x 的正负选择合适的分支 (x >= 0 选 part1, 否则 part2)
-    auto condition = _Greater(x, _Const(0.0f));  // 这里用 >0，等于0走part2，结果一致
-    return _Select(condition, part1, part2);
+    // log(sigmoid(x)) = min(x, 0) - log1p(exp(-abs(x))).
+    // This form keeps the exponential argument non-positive, so large logits do
+    // not overflow. MNN's VARP has no unary '-' operator; _Negative builds the
+    // corresponding differentiable Express node explicitly.
+    const auto zero = _Scalar<float>(0.0f);
+    return _Minimum(x, zero) - _Log1p(_Exp(_Negative(_Abs(x))));
 }
 
 }
