@@ -516,6 +516,11 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
         action[4] = shoot_bernoulli(generator) ? 1.0f : 0.0f;
         result_array[batch] = action;
     }
+    if (m_training_data->rollout_memory == nullptr)
+    {
+        m_training_data->rollout_memory = m_mnnActorNet->GetGRUMemory();
+    }
+    
     return result_array;
 }
 
@@ -675,9 +680,10 @@ void AIAgent::Train(int step)
                 agent_advantage_values[frame];
         }
     }
-
+    m_mnnActorNet->CacheMemory();
     for (int epoch = 0; epoch < step; ++epoch) {
-        m_mnnActorNet->ResetAllGRUMemory();
+        // m_mnnActorNet->ResetAllGRUMemory();
+        m_mnnActorNet->SetGRUMemory(m_training_data->rollout_memory);
         std::vector<VARP> frame_log_probabilities;
         std::vector<VARP> frame_q_values;
         frame_log_probabilities.reserve(frame_count);
@@ -725,6 +731,7 @@ void AIAgent::Train(int step)
         m_critic_optimizer->step(critic_loss);        
     }
     m_training_data->ClearTrainingData();
+    m_mnnActorNet->RestoreMemory();
 }
 
 void godot::AIAgent::SetBatchInfo(int batch_size, int action_dim, int num_frames)

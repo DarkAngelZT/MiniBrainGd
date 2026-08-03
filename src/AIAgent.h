@@ -39,6 +39,7 @@ namespace godot {
         MNN::Express::VARP buffer_action;
         MNN::Express::VARP buffer_log_probs;
         MNN::Express::VARP buffer_q_values;
+        MNN::Express::VARP rollout_memory; // 用于存储每个智能体的GRU记忆，便于训练时恢复状态
         std::unordered_map<int, int> input_mapping; // 智能体编号到当前批次位置
 
         static void SetZero(const MNN::Express::VARP &tensor) {
@@ -56,6 +57,7 @@ namespace godot {
             SetZero(buffer_q_values);
             SetZero(buffer_log_probs);
             input_mapping.clear();
+            rollout_memory = nullptr;
         }
 
         void ClearTrainingData() {

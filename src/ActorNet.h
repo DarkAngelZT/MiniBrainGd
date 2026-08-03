@@ -1,6 +1,7 @@
 #pragma once
 
 #include <MNN/expr/Module.hpp>
+#include <MNN/expr/NeuralNetWorkOp.hpp>
 
 #include <memory>
 
@@ -34,6 +35,10 @@ public:
 
     void ResetAllGRUMemory();
     void ResetGRUMemory(int batch_index);
+    void CacheMemory();
+    void RestoreMemory();
+    MNN::Express::VARP GetGRUMemory() const { return MNN::Express::_Clone(m_gru_hidden, true); }
+    void SetGRUMemory(const MNN::Express::VARP& memory) { m_gru_hidden = MNN::Express::_Clone(memory, true); }
 
 protected:
     ActorNet() = default;
@@ -62,6 +67,7 @@ protected:
     MNN::Express::VARP m_shoot_fc_out_bias;
 
     MNN::Express::VARP m_gru_hidden;
+    MNN::Express::VARP m_gru_hidden_cache;
 };
 
 } // MiniMind命名空间

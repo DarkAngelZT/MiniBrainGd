@@ -118,10 +118,10 @@ ActorNet::ActorNet(int entity_feature_dim,
         std::make_shared<Embedding>(m_input_size, m_embedding_dim);
     m_preprocess_attention =
         std::make_shared<Attention>(m_embedding_dim, m_attention_key_dim);
-    m_preprocess_state_pooling =
-        std::make_shared<StatePooling>(m_embedding_dim);
+    // m_preprocess_state_pooling =
+    //     std::make_shared<StatePooling>(m_embedding_dim);
     m_preprocess_gru =
-        std::make_shared<GRU>(m_embedding_dim * 2, m_gru_hidden_dim);
+        std::make_shared<GRU>(m_embedding_dim * 21, m_gru_hidden_dim);
 
     // AIAgent对每层统一执行N(0,0.1)初始化，因此覆盖子模块自身的默认初始化。
     initialize_normal(m_preprocess_embedding);
@@ -130,7 +130,7 @@ ActorNet::ActorNet(int entity_feature_dim,
     registerModel({
         m_preprocess_embedding,
         m_preprocess_attention,
-        m_preprocess_state_pooling,
+        // m_preprocess_state_pooling,
         m_preprocess_gru});
     setType("ActorNet");
 }
@@ -166,9 +166,10 @@ std::vector<MNN::Express::VARP> ActorNet::onForward(
 
     const auto embedded = _Relu(m_preprocess_embedding->forward(inputs[0]));
     const auto attended = m_preprocess_attention->forward(embedded);
-    const auto pooled = m_preprocess_state_pooling->forward(attended);
+    // const auto pooled = m_preprocess_state_pooling->forward(attended);
+    const auto flattened = _Reshape(attended, {batch_size, -1});
     const auto hidden_next =
-        m_preprocess_gru->forwardStep(pooled, m_gru_hidden);
+        m_preprocess_gru->forwardStep(flattened, m_gru_hidden);
 
     const auto move_hidden = _Relu(
         _Add(_MatMul(hidden_next, m_move_fc, false, true),
@@ -225,6 +226,16 @@ void ActorNet::ResetGRUMemory(int batch_index) {
               0.0f);
     m_gru_hidden = MNN::Express::_Const(
         values.data(), info->dim, MNN::Express::NCHW);
+}
+
+void ActorNet::CacheMemory()
+{
+    m_gru_hidden_cache = MNN::Express::_Clone(m_gru_hidden, true);
+}
+
+void ActorNet::RestoreMemory()
+{
+    m_gru_hidden = MNN::Express::_Clone(m_gru_hidden_cache, true);
 }
 
 MNN::Express::Module* ActorNet::clone(CloneContext* context) const {
