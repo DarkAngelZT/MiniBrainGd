@@ -722,9 +722,9 @@ void AIAgent::Train(int step)
         const auto critic_loss = _ReduceMean(_Square(critic_difference), {});
 
         m_actor_optimizer->step(actor_loss);
-        m_critic_optimizer->step(critic_loss);
-        m_training_data->ClearTrainingData();
+        m_critic_optimizer->step(critic_loss);        
     }
+    m_training_data->ClearTrainingData();
 }
 
 void godot::AIAgent::SetBatchInfo(int batch_size, int action_dim, int num_frames)
