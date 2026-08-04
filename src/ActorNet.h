@@ -58,6 +58,8 @@ protected:
 
     MNN::Express::VARP m_move_fc;
     MNN::Express::VARP m_move_fc_bias;
+    MNN::Express::VARP m_move_fc2;
+    MNN::Express::VARP m_move_fc2_bias;
     MNN::Express::VARP m_move_fc_out;
     MNN::Express::VARP m_move_fc_out_bias;
 

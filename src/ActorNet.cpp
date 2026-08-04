@@ -95,8 +95,10 @@ ActorNet::ActorNet(int entity_feature_dim,
     // 两个动作头完全独立，且输出层不附加激活。
     m_move_fc = make_parameter({m_out_hidden_dim, m_gru_hidden_dim});
     m_move_fc_bias = make_parameter({m_out_hidden_dim});
+    m_move_fc2 = make_parameter({m_out_hidden_dim/2, m_out_hidden_dim});
+    m_move_fc2_bias = make_parameter({m_out_hidden_dim/2});
     m_move_fc_out =
-        make_parameter({m_move_output_size, m_out_hidden_dim});
+        make_parameter({m_move_output_size, m_out_hidden_dim/2});
     m_move_fc_out_bias = make_parameter({m_move_output_size});
 
     m_shoot_fc = make_parameter({m_out_hidden_dim, m_gru_hidden_dim});
@@ -107,6 +109,8 @@ ActorNet::ActorNet(int entity_feature_dim,
 
     addParameter(m_move_fc);
     addParameter(m_move_fc_bias);
+    addParameter(m_move_fc2);
+    addParameter(m_move_fc2_bias);
     addParameter(m_move_fc_out);
     addParameter(m_move_fc_out_bias);
     addParameter(m_shoot_fc);
@@ -171,11 +175,14 @@ std::vector<MNN::Express::VARP> ActorNet::onForward(
     const auto hidden_next =
         m_preprocess_gru->forwardStep(flattened, m_gru_hidden);
 
-    const auto move_hidden = _Relu(
+    const auto move_hidden1 = _Relu(
         _Add(_MatMul(hidden_next, m_move_fc, false, true),
              m_move_fc_bias));
+    const auto move_hidden2 = _Relu(
+        _Add(_MatMul(move_hidden1, m_move_fc2, false, true),
+             m_move_fc2_bias));
     const auto move_output =
-        _Add(_MatMul(move_hidden, m_move_fc_out, false, true),
+        _Add(_MatMul(move_hidden2, m_move_fc_out, false, true),
              m_move_fc_out_bias);
 
     const auto shoot_hidden = _Relu(

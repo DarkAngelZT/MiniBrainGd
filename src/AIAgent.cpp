@@ -484,8 +484,9 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
         float angle_y = shoot_row[1] + standard_deviation * normal(generator);
         const float length = std::sqrt(angle_x * angle_x + angle_y * angle_y);
 
+        const float shoot_probability = 1.0f / (1.0f + std::exp(-shoot_row[3]));
         float sampled_action[5] = {
-            horizontal, vertical, angle_x, angle_y, shoot_row[3]};
+            horizontal, vertical, angle_x, angle_y, shoot_probability};
         std::copy_n(sampled_action, m_training_data->action_dim,
                     buffer_action + batch * m_training_data->action_dim);
         const auto sampled_action_tensor = _Const(
@@ -505,7 +506,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
             angle_x = 1.0f;
             angle_y = 0.0f;
         }
-        const float shoot_probability = 1.0f / (1.0f + std::exp(-shoot_row[3]));
+        
         std::bernoulli_distribution shoot_bernoulli(shoot_probability);
         PackedFloat32Array action;
         action.resize(5);
