@@ -1,4 +1,5 @@
 #include "AIAgent.h"
+#include "EntityMask.h"
 #include <MNN/expr/ExecutorScope.hpp>
 #include <MNN/expr/MathOp.hpp>
 #include <MNN/expr/NeuralNetWorkOp.hpp>
@@ -308,7 +309,10 @@ PackedFloat32Array AIAgent::ProcessSensorData(
             Utf8("AIAgent.ProcessSensorData：输入必须是按实体连续拼接的 [entity*feature] 向量。"));
         return output;
     }
-    const auto result = m_mnnActorNet->onForward({state});
+    auto mask = _Input({1, m_entityNum}, NCHW);
+    MiniMind::BuildEntityMask(state->readMap<float>(), 1, m_entityNum,
+                              m_entityFeatureDim, mask->writeMap<float>());
+    const auto result = m_mnnActorNet->onForward({state, mask});
     if (result.size() != 3 || result[0] == nullptr || result[1] == nullptr) {
         UtilityFunctions::push_error(Utf8("AIAgent.ProcessSensorData：Actor前向计算失败。"));
         return output;
@@ -362,6 +366,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
         return result_array;
     }
     if (m_training_data->buffer_input == nullptr ||
+        m_training_data->buffer_mask == nullptr ||
         m_training_data->buffer_action == nullptr ||
         m_training_data->buffer_log_probs == nullptr ||
         m_training_data->buffer_q_values == nullptr) {
@@ -406,6 +411,7 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
     }
 
     TrainingData::SetZero(m_training_data->buffer_input);
+    TrainingData::SetZero(m_training_data->buffer_mask);
     TrainingData::SetZero(m_training_data->buffer_action);
     m_training_data->input_mapping.clear();
     float *state_data = m_training_data->buffer_input->writeMap<float>();
@@ -420,12 +426,16 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
         }
         m_training_data->input_mapping[agent_ids[batch]] = batch;
     }
+    float *mask_data = m_training_data->buffer_mask->writeMap<float>();
+    MiniMind::BuildEntityMask(state_data, batch_size, m_entityNum,
+                              m_entityFeatureDim, mask_data);
 
     using namespace MNN::Express;
     // 只取当前实际 batch 的连续缓存，并明确构造为 [B,E,F]。
     auto state = _Const(state_data,
                         {batch_size, m_entityNum, m_entityFeatureDim}, NCHW);
-    const auto outputs = m_mnnActorNet->onForward({state});
+    auto mask = _Const(mask_data, {batch_size, m_entityNum}, NCHW);
+    const auto outputs = m_mnnActorNet->onForward({state, mask});
     if (outputs.size() != 3 || outputs[0] == nullptr ||
         outputs[1] == nullptr || outputs[2] == nullptr) {
         UtilityFunctions::push_error(Utf8("AIAgent.BatchProcessSensorData：Actor前向计算失败。"));
@@ -536,6 +546,7 @@ void AIAgent::PushTrainingData(
         return;
     }
     if (m_training_data->state == nullptr ||
+        m_training_data->mask == nullptr ||
         m_training_data->actions == nullptr ||
         m_training_data->rewards == nullptr ||
         m_training_data->done == nullptr ||
@@ -543,6 +554,7 @@ void AIAgent::PushTrainingData(
         m_training_data->old_critic_values == nullptr ||
         m_training_data->old_q_values == nullptr ||
         m_training_data->buffer_input == nullptr ||
+        m_training_data->buffer_mask == nullptr ||
         m_training_data->buffer_action == nullptr ||
         m_training_data->buffer_log_probs == nullptr ||
         m_training_data->buffer_q_values == nullptr) {
@@ -590,12 +602,14 @@ void AIAgent::PushTrainingData(
 
     const int state_size = m_training_data->entity_num * m_training_data->feature_dim;
     float *states = m_training_data->state->writeMap<float>();
+    float *masks = m_training_data->mask->writeMap<float>();
     float *actions = m_training_data->actions->writeMap<float>();
     float *old_log_probs = m_training_data->old_log_probs->writeMap<float>();
     float *rewards = m_training_data->rewards->writeMap<float>();
     float *dones = m_training_data->done->writeMap<float>();
     float *old_q_values = m_training_data->old_q_values->writeMap<float>();
     const float *buffer_states = m_training_data->buffer_input->readMap<float>();
+    const float *buffer_masks = m_training_data->buffer_mask->readMap<float>();
     const float *buffer_actions = m_training_data->buffer_action->readMap<float>();
     const float *buffer_log_probs = m_training_data->buffer_log_probs->readMap<float>();
     const float *buffer_q_values = m_training_data->buffer_q_values->readMap<float>();
@@ -610,6 +624,9 @@ void AIAgent::PushTrainingData(
 
         std::copy_n(buffer_states + buffer_index * state_size, state_size,
                     states + index * state_size);
+        std::copy_n(buffer_masks + buffer_index * m_training_data->entity_num,
+                    m_training_data->entity_num,
+                    masks + index * m_training_data->entity_num);
         std::copy_n(buffer_actions + buffer_index * m_training_data->action_dim,
                     m_training_data->action_dim,
                     actions + index * m_training_data->action_dim);
@@ -637,6 +654,7 @@ void AIAgent::Train(int step)
         return;
     }
     if (m_training_data->state == nullptr ||
+        m_training_data->mask == nullptr ||
         m_training_data->actions == nullptr ||
         m_training_data->rewards == nullptr ||
         m_training_data->done == nullptr ||
@@ -698,13 +716,15 @@ void AIAgent::Train(int step)
                 offset, 0, batch_size, m_entityNum * m_entityFeatureDim);
             states = _Reshape(states,
                               {batch_size, m_entityNum, m_entityFeatureDim});
+            auto masks = Slice2D(
+                m_training_data->mask, offset, 0, batch_size, m_entityNum);
             auto actions = Slice2D(
                 m_training_data->actions, offset, 0, batch_size,
                 m_training_data->action_dim);
             auto dones = Slice2D(
                 m_training_data->done, offset, 0, batch_size, 1);
 
-            const auto actor_outputs = m_mnnActorNet->onForward({states});
+            const auto actor_outputs = m_mnnActorNet->onForward({states, masks});
             frame_log_probabilities.push_back(CalculateLogProbs(
                 actions, actor_outputs[0], actor_outputs[1]));
             frame_q_values.push_back(m_mnnCriticNet->onForward({actor_outputs[2]})[0]);

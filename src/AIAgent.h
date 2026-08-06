@@ -20,6 +20,7 @@ namespace godot {
 
     struct TrainingData {
         MNN::Express::VARP state;
+        MNN::Express::VARP mask;
         MNN::Express::VARP actions;
         MNN::Express::VARP rewards;
         MNN::Express::VARP done;
@@ -36,6 +37,7 @@ namespace godot {
         int action_dim = 0;
 
         MNN::Express::VARP buffer_input;
+        MNN::Express::VARP buffer_mask;
         MNN::Express::VARP buffer_action;
         MNN::Express::VARP buffer_log_probs;
         MNN::Express::VARP buffer_q_values;
@@ -53,6 +55,7 @@ namespace godot {
         void Clear() {
             ClearTrainingData();
             SetZero(buffer_input);
+            SetZero(buffer_mask);
             SetZero(buffer_action);
             SetZero(buffer_q_values);
             SetZero(buffer_log_probs);
@@ -62,6 +65,7 @@ namespace godot {
 
         void ClearTrainingData() {
             SetZero(state);
+            SetZero(mask);
             SetZero(actions);
             SetZero(rewards);
             SetZero(done);
@@ -81,6 +85,7 @@ namespace godot {
             // 帧数据在首维连续存放，每一批取出后仍是[batch, entity, feature]。
             const int sample_capacity = inBatch_size * inNum_frames;
             state = MNN::Express::_Input({sample_capacity, inEntity_num, inFeature_dim}, MNN::Express::NCHW);
+            mask = MNN::Express::_Input({sample_capacity, inEntity_num}, MNN::Express::NCHW);
             actions = MNN::Express::_Input({sample_capacity, inAction_dim}, MNN::Express::NCHW);
             rewards = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
             done = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
@@ -89,6 +94,7 @@ namespace godot {
             old_q_values = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
 
             buffer_input = MNN::Express::_Input({inBatch_size, inEntity_num, inFeature_dim}, MNN::Express::NCHW);
+            buffer_mask = MNN::Express::_Input({inBatch_size, inEntity_num}, MNN::Express::NCHW);
             buffer_action = MNN::Express::_Input({inBatch_size, inAction_dim}, MNN::Express::NCHW);
             buffer_log_probs = MNN::Express::_Input({inBatch_size, 1}, MNN::Express::NCHW);
             buffer_q_values = MNN::Express::_Input({inBatch_size, 1}, MNN::Express::NCHW);

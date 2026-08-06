@@ -141,7 +141,7 @@ ActorNet::ActorNet(int entity_feature_dim,
 
 std::vector<MNN::Express::VARP> ActorNet::onForward(
     const std::vector<MNN::Express::VARP>& inputs) {
-    if (inputs.size() != 1 || inputs[0] == nullptr) {
+    if (inputs.size() != 2 || inputs[0] == nullptr || inputs[1] == nullptr) {
         MNN_ERROR("ActorNet：必须提供一个非空state输入。\n");
         return {};
     }
@@ -152,6 +152,14 @@ std::vector<MNN::Express::VARP> ActorNet::onForward(
         state_info->dim[2] != m_input_size ||
         state_info->type != halide_type_of<float>()) {
         MNN_ERROR("ActorNet：state必须为[B,E,F]的float32张量。\n");
+        return {};
+    }
+    const auto* mask_info = inputs[1]->getInfo();
+    if (mask_info == nullptr || mask_info->dim.size() != 2 ||
+        mask_info->dim[0] != state_info->dim[0] ||
+        mask_info->dim[1] != state_info->dim[1] ||
+        mask_info->type != halide_type_of<float>()) {
+        MNN_ERROR("ActorNet: mask must be a float32 tensor shaped [B,E].\n");
         return {};
     }
 
@@ -169,7 +177,7 @@ std::vector<MNN::Express::VARP> ActorNet::onForward(
     }
 
     const auto embedded = _Relu(m_preprocess_embedding->forward(inputs[0]));
-    const auto attended = m_preprocess_attention->forward(embedded);
+    const auto attended = m_preprocess_attention->forward(embedded, inputs[1]);
     // const auto pooled = m_preprocess_state_pooling->forward(attended);
     const auto flattened = _Reshape(attended, {batch_size, -1});
     const auto hidden_next =
