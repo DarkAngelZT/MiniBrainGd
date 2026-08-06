@@ -14,10 +14,13 @@ class StatePooling;
 
 class ActorNet : public MNN::Express::Module {
 public:
-    // 便捷构造沿用AIAgent的默认网络宽度；input_size表示单个实体的特征数。
-    ActorNet(int input_size, int move_output_size, int shoot_output_size);
+    // 便捷构造沿用AIAgent的默认网络宽度，三个dim分别表示三类实体的特征数。
+    ActorNet(int player_dim, int monster_dim, int bullet_dim,
+             int move_output_size, int shoot_output_size);
 
-    ActorNet(int entity_feature_dim,
+    ActorNet(int player_dim,
+             int monster_dim,
+             int bullet_dim,
              int move_output_size,
              int shoot_output_size,
              int embedding_dim,
@@ -27,7 +30,7 @@ public:
 
     virtual ~ActorNet() override = default;
 
-    // 输入为state[B,E,F]，输出依次为move、shoot和当前步hidden；GRU记忆由模块内部维护。
+    // 输入依次为玩家、怪物、子弹和掩码，输出为move、shoot和当前步hidden。
     std::vector<MNN::Express::VARP> onForward(
         const std::vector<MNN::Express::VARP>& inputs) override;
 
@@ -43,7 +46,9 @@ public:
 protected:
     ActorNet() = default;
 
-    int m_input_size = 0;
+    int m_player_dim = 0;
+    int m_monster_dim = 0;
+    int m_bullet_dim = 0;
     int m_move_output_size = 0;
     int m_shoot_output_size = 0;
     int m_embedding_dim = 0;
@@ -51,7 +56,9 @@ protected:
     int m_gru_hidden_dim = 0;
     int m_out_hidden_dim = 0;
 
-    std::shared_ptr<Embedding> m_preprocess_embedding;
+    std::shared_ptr<Embedding> m_player_embedding;
+    std::shared_ptr<Embedding> m_monster_embedding;
+    std::shared_ptr<Embedding> m_bullet_embedding;
     std::shared_ptr<Attention> m_preprocess_attention;
     std::shared_ptr<StatePooling> m_preprocess_state_pooling;
     std::shared_ptr<GRU> m_preprocess_gru;

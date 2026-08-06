@@ -19,7 +19,9 @@ namespace MNN::Train { class ParameterOptimizer; }
 namespace godot {
 
     struct TrainingData {
-        MNN::Express::VARP state;
+        MNN::Express::VARP player_state;
+        MNN::Express::VARP monster_state;
+        MNN::Express::VARP bullet_state;
         MNN::Express::VARP mask;
         MNN::Express::VARP actions;
         MNN::Express::VARP rewards;
@@ -32,11 +34,16 @@ namespace godot {
         std::unordered_map<int, int> agent_write_index; // 智能体编号到当前写入位置
         int batch_size = 0;
         int num_frames = 1;
-        int entity_num = 0;
-        int feature_dim = 0;
+        int monster_entity_num = 0;
+        int bullet_entity_num = 0;
+        int player_dim = 0;
+        int monster_dim = 0;
+        int bullet_dim = 0;
         int action_dim = 0;
 
-        MNN::Express::VARP buffer_input;
+        MNN::Express::VARP buffer_player;
+        MNN::Express::VARP buffer_monster;
+        MNN::Express::VARP buffer_bullet;
         MNN::Express::VARP buffer_mask;
         MNN::Express::VARP buffer_action;
         MNN::Express::VARP buffer_log_probs;
@@ -54,7 +61,9 @@ namespace godot {
 
         void Clear() {
             ClearTrainingData();
-            SetZero(buffer_input);
+            SetZero(buffer_player);
+            SetZero(buffer_monster);
+            SetZero(buffer_bullet);
             SetZero(buffer_mask);
             SetZero(buffer_action);
             SetZero(buffer_q_values);
@@ -64,7 +73,9 @@ namespace godot {
         }
 
         void ClearTrainingData() {
-            SetZero(state);
+            SetZero(player_state);
+            SetZero(monster_state);
+            SetZero(bullet_state);
             SetZero(mask);
             SetZero(actions);
             SetZero(rewards);
@@ -75,27 +86,37 @@ namespace godot {
             agent_write_index.clear();
         }
 
-        void Init(int inBatch_size, int inNum_frames, int inEntity_num, int inFeature_dim, int inAction_dim) {
+        void Init(int inBatch_size, int inNum_frames,
+                  int inMonsterEntityNum, int inBulletEntityNum,
+                  int inPlayerDim, int inMonsterDim, int inBulletDim,
+                  int inActionDim) {
             this->batch_size = inBatch_size;
             this->num_frames = inNum_frames;
-            this->entity_num = inEntity_num;
-            this->feature_dim = inFeature_dim;
-            this->action_dim = inAction_dim;
+            monster_entity_num = inMonsterEntityNum;
+            bullet_entity_num = inBulletEntityNum;
+            player_dim = inPlayerDim;
+            monster_dim = inMonsterDim;
+            bullet_dim = inBulletDim;
+            action_dim = inActionDim;
 
             // 帧数据在首维连续存放，每一批取出后仍是[batch, entity, feature]。
             const int sample_capacity = inBatch_size * inNum_frames;
-            state = MNN::Express::_Input({sample_capacity, inEntity_num, inFeature_dim}, MNN::Express::NCHW);
-            mask = MNN::Express::_Input({sample_capacity, inEntity_num}, MNN::Express::NCHW);
-            actions = MNN::Express::_Input({sample_capacity, inAction_dim}, MNN::Express::NCHW);
+            player_state = MNN::Express::_Input({sample_capacity, 1, inPlayerDim}, MNN::Express::NCHW);
+            monster_state = MNN::Express::_Input({sample_capacity, inMonsterEntityNum, inMonsterDim}, MNN::Express::NCHW);
+            bullet_state = MNN::Express::_Input({sample_capacity, inBulletEntityNum, inBulletDim}, MNN::Express::NCHW);
+            mask = MNN::Express::_Input({sample_capacity, 1 + inMonsterEntityNum + inBulletEntityNum}, MNN::Express::NCHW);
+            actions = MNN::Express::_Input({sample_capacity, inActionDim}, MNN::Express::NCHW);
             rewards = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
             done = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
             old_critic_values = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
             old_log_probs = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
             old_q_values = MNN::Express::_Input({sample_capacity, 1}, MNN::Express::NCHW);
 
-            buffer_input = MNN::Express::_Input({inBatch_size, inEntity_num, inFeature_dim}, MNN::Express::NCHW);
-            buffer_mask = MNN::Express::_Input({inBatch_size, inEntity_num}, MNN::Express::NCHW);
-            buffer_action = MNN::Express::_Input({inBatch_size, inAction_dim}, MNN::Express::NCHW);
+            buffer_player = MNN::Express::_Input({inBatch_size, 1, inPlayerDim}, MNN::Express::NCHW);
+            buffer_monster = MNN::Express::_Input({inBatch_size, inMonsterEntityNum, inMonsterDim}, MNN::Express::NCHW);
+            buffer_bullet = MNN::Express::_Input({inBatch_size, inBulletEntityNum, inBulletDim}, MNN::Express::NCHW);
+            buffer_mask = MNN::Express::_Input({inBatch_size, 1 + inMonsterEntityNum + inBulletEntityNum}, MNN::Express::NCHW);
+            buffer_action = MNN::Express::_Input({inBatch_size, inActionDim}, MNN::Express::NCHW);
             buffer_log_probs = MNN::Express::_Input({inBatch_size, 1}, MNN::Express::NCHW);
             buffer_q_values = MNN::Express::_Input({inBatch_size, 1}, MNN::Express::NCHW);
             Clear();
@@ -113,8 +134,11 @@ protected:
     static void _bind_methods();
     AIAgentMode mode;
     int m_insize,m_outSize;
-    int m_entityNum = 0;
-    int m_entityFeatureDim = 0;
+    int m_monsterEntityNum = 0;
+    int m_bulletEntityNum = 0;
+    int m_playerDim = 0;
+    int m_monsterDim = 0;
+    int m_bulletDim = 0;
 
     // Actor 在推理和训练模式下共用，Critic 仅在训练模式下创建。
     MiniMind::ActorNet *m_mnnActorNet = nullptr;
@@ -146,15 +170,22 @@ public:
     ~AIAgent();
 
     void Init(
-        int entity_num, int feature_dim, int move_dim, int shoot_dim,
+        int monster_entity_num, int bullet_entity_num,
+        int player_dim, int monster_dim, int bullet_dim,
+        int move_dim, int shoot_dim,
         int embedding_dim=16, int attention_key_dim=16, int gru_hidden_dim = 128,
         int out_hidden_dim = 128);
 
     AIAgentMode get_mode() const;
     void set_mode(AIAgentMode mode);
 
-    PackedFloat32Array ProcessSensorData(const PackedFloat32Array &data, bool isGameEnd = false);
-    godot::Array BatchProcessSensorData(const godot::Array &batch_data, const godot::PackedInt32Array &agent_ids);
+    PackedFloat32Array ProcessSensorData(
+        const PackedFloat32Array &player, const PackedFloat32Array &monster,
+        const PackedFloat32Array &bullet, bool isGameEnd = false);
+    godot::Array BatchProcessSensorData(
+        const godot::Array &batch_player, const godot::Array &batch_monster,
+        const godot::Array &batch_bullet,
+        const godot::PackedInt32Array &agent_ids);
 
     void PushTrainingData(const godot::PackedFloat32Array& batch_rewards, const godot::PackedInt32Array &agent_ids, const godot::PackedFloat32Array &batch_dones);
 

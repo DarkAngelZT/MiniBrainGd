@@ -52,7 +52,7 @@ agent.Init(
 )
 
 # 推理单条输入
-var actions = agent.ProcessSensorData(input_vector)
+var actions = agent.ProcessSensorData(player_data, monster_data, bullet_data)
 # 返回值：[horizon, vertical, shoot_angle, shoot_action]
 ```
 
@@ -62,7 +62,7 @@ var actions = agent.ProcessSensorData(input_vector)
 
 #### 主要函数
 
-**`ProcessSensorData(data: PackedFloat32Array, isGameEnd: bool) -> PackedFloat32Array`**
+**`ProcessSensorData(player: PackedFloat32Array, monster: PackedFloat32Array, bullet: PackedFloat32Array, isGameEnd: bool) -> PackedFloat32Array`**
 
 对单条输入进行推理。
 
@@ -83,12 +83,12 @@ var actions = agent.ProcessSensorData(input_vector)
 # 创建推理代理
 var agent = AIAgent.new()
 agent.set_mode(AIAgent.INFERENCE)
-agent.Init(input_dim=64, move_dim=6, shoot_dim=3)
+agent.Init(monster_entity_num=10, bullet_entity_num=10, player_dim=4, monster_dim=4, bullet_dim=4, move_dim=6, shoot_dim=4)
 
 # 每帧推理
 func _process(delta):
     var sensor_data = collect_sensor_data()  # 收集环境状态
-    var actions = agent.ProcessSensorData(sensor_data)
+    var actions = agent.ProcessSensorData(player_data, monster_data, bullet_data)
     
     apply_actions(actions[0], actions[1], actions[2], actions[3])
 ```
@@ -114,7 +114,7 @@ BatchProcessSensorData → [执行一帧环境交互] → PushTrainingData → [
   - `action_dim`: 动作维度（通常为移动维度 + 射击维度）
   - `num_frames`: 每个 Agent 的历史帧数
 
-**`BatchProcessSensorData(batch_data: Array, agent_ids: PackedInt32Array) -> Array`**
+**`BatchProcessSensorData(batch_player: Array, batch_monster: Array, batch_bullet: Array, agent_ids: PackedInt32Array) -> Array`**
 
 批量推理多个 Agent 的状态，并执行探索性采样。
 
@@ -159,7 +159,7 @@ BatchProcessSensorData → [执行一帧环境交互] → PushTrainingData → [
 # 创建训练代理
 var agent = AIAgent.new()
 agent.set_mode(AIAgent.TRAINING)
-agent.Init(input_dim=6, move_dim=6, shoot_dim=3, entity_feature_dim=4, 
+agent.Init(monster_entity_num=10, bullet_entity_num=10, player_dim=4, monster_dim=4, bullet_dim=4, move_dim=6, shoot_dim=4,
            embedding_dim=32, attention_key_dim=16, gru_hidden_dim=64, out_hidden_dim=128)
 
 # 设置训练参数
@@ -179,7 +179,7 @@ func _process(delta):
         agent_ids.append(i)
     
     # 2. 模型输出动作
-    var actions = agent.BatchProcessSensorData(batch_states, PackedInt32Array(agent_ids))
+    var actions = agent.BatchProcessSensorData(batch_players, batch_monsters, batch_bullets, PackedInt32Array(agent_ids))
     
     # 3. 执行动作，收集反馈
     var rewards = []
@@ -235,7 +235,7 @@ agent.Load("C:/path/to/your/project/ai", "checkpoint")
 
 ### 网络初始化参数
 
-**`Init(input_dim, move_dim, shoot_dim, entity_feature_dim=16, embedding_dim=16, attention_key_dim=128, gru_hidden_dim=128, out_hidden_dim=128)`**
+**`Init(monster_entity_num, bullet_entity_num, player_dim, monster_dim, bullet_dim, move_dim, shoot_dim, embedding_dim=16, attention_key_dim=16, gru_hidden_dim=128, out_hidden_dim=128)`**
 
 初始化神经网络架构。
 
@@ -314,7 +314,7 @@ var agents_data = []
 for agent_id in range(num_agents):
     agents_data.append(get_agent_observation(agent_id))
 
-var actions = agent.BatchProcessSensorData(agents_data, PackedInt32Array(range(num_agents)))
+var actions = agent.BatchProcessSensorData(batch_players, batch_monsters, batch_bullets, PackedInt32Array(range(num_agents)))
 ```
 
 Agent 通过 `agent_id` 自动维护各自的 GRU 状态和轨迹缓冲。

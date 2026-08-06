@@ -20,11 +20,11 @@ using namespace godot;
 
 void AIAgent::_bind_methods() 
 {
-    ClassDB::bind_method(D_METHOD("Init", "entity_num", "feature_dim", "move_dim", "shoot_dim", "embedding_dim", "attention_key_dim", "gru_hidden_dim", "out_hidden_dim"), &AIAgent::Init, DEFVAL(16), DEFVAL(16), DEFVAL(128), DEFVAL(128));
+    ClassDB::bind_method(D_METHOD("Init", "monster_entity_num", "bullet_entity_num", "player_dim", "monster_dim", "bullet_dim", "move_dim", "shoot_dim", "embedding_dim", "attention_key_dim", "gru_hidden_dim", "out_hidden_dim"), &AIAgent::Init, DEFVAL(16), DEFVAL(16), DEFVAL(128), DEFVAL(128));
     ClassDB::bind_method(D_METHOD("get_mode"), &AIAgent::get_mode);
     ClassDB::bind_method(D_METHOD("set_mode", "mode"), &AIAgent::set_mode);
-    ClassDB::bind_method(D_METHOD("ProcessSensorData", "data", "isGameEnd"), &AIAgent::ProcessSensorData, DEFVAL(false));
-    ClassDB::bind_method(D_METHOD("BatchProcessSensorData", "batch_data", "agent_ids"), &AIAgent::BatchProcessSensorData);
+    ClassDB::bind_method(D_METHOD("ProcessSensorData", "player", "monster", "bullet", "isGameEnd"), &AIAgent::ProcessSensorData, DEFVAL(false));
+    ClassDB::bind_method(D_METHOD("BatchProcessSensorData", "batch_player", "batch_monster", "batch_bullet", "agent_ids"), &AIAgent::BatchProcessSensorData);
     ClassDB::bind_method(D_METHOD("PushTrainingData", "batch_rewards", "agent_ids", "batch_dones"), &AIAgent::PushTrainingData);
     ClassDB::bind_method(D_METHOD("Train", "step"), &AIAgent::Train);
     ClassDB::bind_method(D_METHOD("SetBatchInfo", "batch_size", "action_dim", "num_frames"), &AIAgent::SetBatchInfo, DEFVAL(1));
@@ -201,8 +201,8 @@ AIAgent::~AIAgent()
     m_critic_optimizer.reset();
     m_insize = 0;
     m_outSize = 0;
-    m_entityNum = 0;
-    m_entityFeatureDim = 0;
+    m_monsterEntityNum = m_bulletEntityNum = 0;
+    m_playerDim = m_monsterDim = m_bulletDim = 0;
     delete m_mnnActorNet;
     delete m_mnnCriticNet;
 }
@@ -231,7 +231,9 @@ void AIAgent::UpdateActorNetTrainingMode()
 }
 
 void AIAgent::Init(
-    int entity_num, int feature_dim, int move_dim, int shoot_dim,
+    int monster_entity_num, int bullet_entity_num,
+    int player_dim, int monster_dim, int bullet_dim,
+    int move_dim, int shoot_dim,
     int embedding_dim,
     int attention_key_dim, int gru_hidden_dim,
     int out_hidden_dim)
@@ -245,10 +247,11 @@ void AIAgent::Init(
     m_training_data.reset();
     m_insize = 0;
     m_outSize = 0;
-    m_entityNum = 0;
-    m_entityFeatureDim = 0;
+    m_monsterEntityNum = m_bulletEntityNum = 0;
+    m_playerDim = m_monsterDim = m_bulletDim = 0;
 
-    if (entity_num <= 0 || feature_dim <= 0 || move_dim < 6 ||
+    if (monster_entity_num <= 0 || bullet_entity_num <= 0 ||
+        player_dim <= 0 || monster_dim <= 0 || bullet_dim <= 0 || move_dim < 6 ||
         shoot_dim < 4 || embedding_dim <= 0 || attention_key_dim <= 0 ||
         gru_hidden_dim <= 0 || out_hidden_dim <= 0) {
         UtilityFunctions::push_error(
@@ -256,13 +259,17 @@ void AIAgent::Init(
         return;
     }
 
-    m_insize = entity_num * feature_dim;
+    m_insize = player_dim + monster_entity_num * monster_dim +
+        bullet_entity_num * bullet_dim;
     m_outSize = move_dim + shoot_dim;
-    m_entityNum = entity_num;
-    m_entityFeatureDim = feature_dim;
+    m_monsterEntityNum = monster_entity_num;
+    m_bulletEntityNum = bullet_entity_num;
+    m_playerDim = player_dim;
+    m_monsterDim = monster_dim;
+    m_bulletDim = bullet_dim;
 
     m_mnnActorNet = new MiniMind::ActorNet(
-        feature_dim, move_dim, shoot_dim, embedding_dim,
+        player_dim, monster_dim, bullet_dim, move_dim, shoot_dim, embedding_dim,
         attention_key_dim, gru_hidden_dim, out_hidden_dim);
 
     if (mode == AIAgentMode::TRAINING) {
@@ -287,40 +294,55 @@ void AIAgent::Init(
 }
 
 PackedFloat32Array AIAgent::ProcessSensorData(
-    const PackedFloat32Array &input, bool isGameEnd)
+    const PackedFloat32Array &player_input,
+    const PackedFloat32Array &monster_input,
+    const PackedFloat32Array &bullet_input,
+    bool isGameEnd)
 {
     PackedFloat32Array output;
     if (m_mnnActorNet == nullptr) {
-        UtilityFunctions::push_error(Utf8("AIAgent.ProcessSensorData：Actor 尚未初始化。"));
+        UtilityFunctions::push_error("AIAgent.ProcessSensorData: Actor is not initialized.");
         return output;
     }
-    if (input.size() != m_insize) {
+    if (player_input.size() != m_playerDim ||
+        monster_input.size() != m_monsterEntityNum * m_monsterDim ||
+        bullet_input.size() != m_bulletEntityNum * m_bulletDim) {
         UtilityFunctions::push_error(
-            Utf8("AIAgent.ProcessSensorData：输入长度必须等于 entity_num*feature_dim。"));
+            "AIAgent.ProcessSensorData: input sizes do not match Init.");
         return output;
     }
 
     using namespace MNN::Express;
-    // PackedFloat32Array 是一个 [E*F] 拼接向量，在写入后明确赋予 [1,E,F] 形状。
-    auto state = _Input({1, m_entityNum, m_entityFeatureDim}, NCHW);
-    if (!CopyFlattenedState(input, m_entityNum, m_entityFeatureDim,
-                            state->writeMap<float>())) {
+    auto player = _Input({1, 1, m_playerDim}, NCHW);
+    auto monster = _Input({1, m_monsterEntityNum, m_monsterDim}, NCHW);
+    auto bullet = _Input({1, m_bulletEntityNum, m_bulletDim}, NCHW);
+    if (!CopyFlattenedState(player_input, 1, m_playerDim,
+                            player->writeMap<float>()) ||
+        !CopyFlattenedState(monster_input, m_monsterEntityNum, m_monsterDim,
+                            monster->writeMap<float>()) ||
+        !CopyFlattenedState(bullet_input, m_bulletEntityNum, m_bulletDim,
+                            bullet->writeMap<float>())) {
         UtilityFunctions::push_error(
-            Utf8("AIAgent.ProcessSensorData：输入必须是按实体连续拼接的 [entity*feature] 向量。"));
+            "AIAgent.ProcessSensorData: input layout conversion failed.");
         return output;
     }
-    auto mask = _Input({1, m_entityNum}, NCHW);
-    MiniMind::BuildEntityMask(state->readMap<float>(), 1, m_entityNum,
-                              m_entityFeatureDim, mask->writeMap<float>());
-    const auto result = m_mnnActorNet->onForward({state, mask});
+    const int entity_num = 1 + m_monsterEntityNum + m_bulletEntityNum;
+    auto mask = _Input({1, entity_num}, NCHW);
+    MiniMind::BuildEntityMask(
+        player->readMap<float>(), 1, 1, m_playerDim,
+        monster->readMap<float>(), m_monsterEntityNum, m_monsterDim,
+        bullet->readMap<float>(), m_bulletEntityNum, m_bulletDim,
+        mask->writeMap<float>());
+    const auto result = m_mnnActorNet->onForward(
+        {player, monster, bullet, mask});
     if (result.size() != 3 || result[0] == nullptr || result[1] == nullptr) {
-        UtilityFunctions::push_error(Utf8("AIAgent.ProcessSensorData：Actor前向计算失败。"));
+        UtilityFunctions::push_error("AIAgent.ProcessSensorData: Actor forward failed.");
         return output;
     }
     const float *move = result[0]->readMap<float>();
     const float *shoot = result[1]->readMap<float>();
     if (move == nullptr || shoot == nullptr) {
-        UtilityFunctions::push_error(Utf8("AIAgent.ProcessSensorData：Actor输出读取失败。"));
+        UtilityFunctions::push_error("AIAgent.ProcessSensorData: Actor output read failed.");
         return output;
     }
 
@@ -356,7 +378,9 @@ PackedFloat32Array AIAgent::ProcessSensorData(
 }
 
 godot::Array godot::AIAgent::BatchProcessSensorData(
-    const godot::Array &batch_data,
+    const godot::Array &batch_player,
+    const godot::Array &batch_monster,
+    const godot::Array &batch_bullet,
     const godot::PackedInt32Array &agent_ids)
 {
     godot::Array result_array;
@@ -365,77 +389,83 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
         UtilityFunctions::push_error("Agent: training network is not set!");
         return result_array;
     }
-    if (m_training_data->buffer_input == nullptr ||
+    if (m_training_data->buffer_player == nullptr ||
+        m_training_data->buffer_monster == nullptr ||
+        m_training_data->buffer_bullet == nullptr ||
         m_training_data->buffer_mask == nullptr ||
         m_training_data->buffer_action == nullptr ||
         m_training_data->buffer_log_probs == nullptr ||
         m_training_data->buffer_q_values == nullptr) {
         UtilityFunctions::push_error(
-            Utf8("AIAgent.BatchProcessSensorData：请先调用SetBatchInfo。"));
+            "AIAgent.BatchProcessSensorData: call SetBatchInfo first.");
         return result_array;
     }
-    if (batch_data.size() == 0 || agent_ids.size() != batch_data.size()) {
-        UtilityFunctions::push_error("Agent: invalid batch input!");
-        return result_array;
-    }
-
-    const int batch_size = batch_data.size();
-    if (batch_size > m_training_data->batch_size) {
-        UtilityFunctions::push_error("Agent: batch size exceeds configured capacity!");
+    const int batch_size = batch_player.size();
+    if (batch_size == 0 || batch_monster.size() != batch_size ||
+        batch_bullet.size() != batch_size || agent_ids.size() != batch_size ||
+        batch_size > m_training_data->batch_size) {
+        UtilityFunctions::push_error("AIAgent.BatchProcessSensorData: invalid batch sizes.");
         return result_array;
     }
 
-    // 先完整校验，避免无效 batch 写入一半后污染本帧缓存和智能体映射。
     std::unordered_set<int> unique_agent_ids;
-    std::vector<PackedFloat32Array> samples;
-    samples.reserve(static_cast<std::size_t>(batch_size));
+    std::vector<PackedFloat32Array> players, monsters, bullets;
+    players.reserve(batch_size); monsters.reserve(batch_size); bullets.reserve(batch_size);
     for (int batch = 0; batch < batch_size; ++batch) {
-        const Variant sample_variant = batch_data[batch];
-        if (sample_variant.get_type() != Variant::PACKED_FLOAT32_ARRAY) {
-            UtilityFunctions::push_error(
-                Utf8("AIAgent.BatchProcessSensorData：batch 中的每个样本都必须是 PackedFloat32Array。"));
+        if (batch_player[batch].get_type() != Variant::PACKED_FLOAT32_ARRAY ||
+            batch_monster[batch].get_type() != Variant::PACKED_FLOAT32_ARRAY ||
+            batch_bullet[batch].get_type() != Variant::PACKED_FLOAT32_ARRAY) {
+            UtilityFunctions::push_error("AIAgent.BatchProcessSensorData: every input must be PackedFloat32Array.");
             return godot::Array();
         }
-        const PackedFloat32Array sample = sample_variant;
-        if (sample.size() != m_insize) {
-            UtilityFunctions::push_error(
-                Utf8("AIAgent.BatchProcessSensorData：每个样本必须包含 entity_num*feature_dim 个数值。"));
+        PackedFloat32Array player = batch_player[batch];
+        PackedFloat32Array monster = batch_monster[batch];
+        PackedFloat32Array bullet = batch_bullet[batch];
+        if (player.size() != m_playerDim ||
+            monster.size() != m_monsterEntityNum * m_monsterDim ||
+            bullet.size() != m_bulletEntityNum * m_bulletDim ||
+            !unique_agent_ids.insert(agent_ids[batch]).second) {
+            UtilityFunctions::push_error("AIAgent.BatchProcessSensorData: invalid input size or duplicate agent_id.");
             return godot::Array();
         }
-        if (!unique_agent_ids.insert(agent_ids[batch]).second) {
-            UtilityFunctions::push_error(
-                Utf8("AIAgent.BatchProcessSensorData：同一 batch 中的 agent_id 不能重复。"));
-            return godot::Array();
-        }
-        samples.push_back(sample);
+        players.push_back(player); monsters.push_back(monster); bullets.push_back(bullet);
     }
 
-    TrainingData::SetZero(m_training_data->buffer_input);
+    TrainingData::SetZero(m_training_data->buffer_player);
+    TrainingData::SetZero(m_training_data->buffer_monster);
+    TrainingData::SetZero(m_training_data->buffer_bullet);
     TrainingData::SetZero(m_training_data->buffer_mask);
     TrainingData::SetZero(m_training_data->buffer_action);
     m_training_data->input_mapping.clear();
-    float *state_data = m_training_data->buffer_input->writeMap<float>();
+    float *player_data = m_training_data->buffer_player->writeMap<float>();
+    float *monster_data = m_training_data->buffer_monster->writeMap<float>();
+    float *bullet_data = m_training_data->buffer_bullet->writeMap<float>();
     for (int batch = 0; batch < batch_size; ++batch) {
-        // batch 偏移在最外层，每个样本内部仍是 entity 优先、feature 连续。
-        if (!CopyFlattenedState(samples[batch], m_entityNum,
-                                m_entityFeatureDim,
-                                state_data + batch * m_insize)) {
-            UtilityFunctions::push_error(
-                Utf8("AIAgent.BatchProcessSensorData：样本布局转换失败。"));
+        if (!CopyFlattenedState(players[batch], 1, m_playerDim,
+                                player_data + batch * m_playerDim) ||
+            !CopyFlattenedState(monsters[batch], m_monsterEntityNum, m_monsterDim,
+                                monster_data + batch * m_monsterEntityNum * m_monsterDim) ||
+            !CopyFlattenedState(bullets[batch], m_bulletEntityNum, m_bulletDim,
+                                bullet_data + batch * m_bulletEntityNum * m_bulletDim)) {
             return godot::Array();
         }
         m_training_data->input_mapping[agent_ids[batch]] = batch;
     }
+    const int entity_num = 1 + m_monsterEntityNum + m_bulletEntityNum;
     float *mask_data = m_training_data->buffer_mask->writeMap<float>();
-    MiniMind::BuildEntityMask(state_data, batch_size, m_entityNum,
-                              m_entityFeatureDim, mask_data);
+    MiniMind::BuildEntityMask(
+        player_data, batch_size, 1, m_playerDim,
+        monster_data, m_monsterEntityNum, m_monsterDim,
+        bullet_data, m_bulletEntityNum, m_bulletDim, mask_data);
 
     using namespace MNN::Express;
-    // 只取当前实际 batch 的连续缓存，并明确构造为 [B,E,F]。
-    auto state = _Const(state_data,
-                        {batch_size, m_entityNum, m_entityFeatureDim}, NCHW);
-    auto mask = _Const(mask_data, {batch_size, m_entityNum}, NCHW);
-    const auto outputs = m_mnnActorNet->onForward({state, mask});
+    auto player = _Const(player_data, {batch_size, 1, m_playerDim}, NCHW);
+    auto monster = _Const(monster_data,
+                          {batch_size, m_monsterEntityNum, m_monsterDim}, NCHW);
+    auto bullet = _Const(bullet_data,
+                         {batch_size, m_bulletEntityNum, m_bulletDim}, NCHW);
+    auto mask = _Const(mask_data, {batch_size, entity_num}, NCHW);
+    const auto outputs = m_mnnActorNet->onForward({player, monster, bullet, mask});
     if (outputs.size() != 3 || outputs[0] == nullptr ||
         outputs[1] == nullptr || outputs[2] == nullptr) {
         UtilityFunctions::push_error(Utf8("AIAgent.BatchProcessSensorData：Actor前向计算失败。"));
@@ -545,7 +575,9 @@ void AIAgent::PushTrainingData(
         UtilityFunctions::push_error("Agent: training network is not set!");
         return;
     }
-    if (m_training_data->state == nullptr ||
+    if (m_training_data->player_state == nullptr ||
+        m_training_data->monster_state == nullptr ||
+        m_training_data->bullet_state == nullptr ||
         m_training_data->mask == nullptr ||
         m_training_data->actions == nullptr ||
         m_training_data->rewards == nullptr ||
@@ -553,7 +585,9 @@ void AIAgent::PushTrainingData(
         m_training_data->old_log_probs == nullptr ||
         m_training_data->old_critic_values == nullptr ||
         m_training_data->old_q_values == nullptr ||
-        m_training_data->buffer_input == nullptr ||
+        m_training_data->buffer_player == nullptr ||
+        m_training_data->buffer_monster == nullptr ||
+        m_training_data->buffer_bullet == nullptr ||
         m_training_data->buffer_mask == nullptr ||
         m_training_data->buffer_action == nullptr ||
         m_training_data->buffer_log_probs == nullptr ||
@@ -600,15 +634,22 @@ void AIAgent::PushTrainingData(
         }
     }
 
-    const int state_size = m_training_data->entity_num * m_training_data->feature_dim;
-    float *states = m_training_data->state->writeMap<float>();
+    const int player_size = m_playerDim;
+    const int monster_size = m_monsterEntityNum * m_monsterDim;
+    const int bullet_size = m_bulletEntityNum * m_bulletDim;
+    const int entity_num = 1 + m_monsterEntityNum + m_bulletEntityNum;
+    float *player_states = m_training_data->player_state->writeMap<float>();
+    float *monster_states = m_training_data->monster_state->writeMap<float>();
+    float *bullet_states = m_training_data->bullet_state->writeMap<float>();
     float *masks = m_training_data->mask->writeMap<float>();
     float *actions = m_training_data->actions->writeMap<float>();
     float *old_log_probs = m_training_data->old_log_probs->writeMap<float>();
     float *rewards = m_training_data->rewards->writeMap<float>();
     float *dones = m_training_data->done->writeMap<float>();
     float *old_q_values = m_training_data->old_q_values->writeMap<float>();
-    const float *buffer_states = m_training_data->buffer_input->readMap<float>();
+    const float *buffer_players = m_training_data->buffer_player->readMap<float>();
+    const float *buffer_monsters = m_training_data->buffer_monster->readMap<float>();
+    const float *buffer_bullets = m_training_data->buffer_bullet->readMap<float>();
     const float *buffer_masks = m_training_data->buffer_mask->readMap<float>();
     const float *buffer_actions = m_training_data->buffer_action->readMap<float>();
     const float *buffer_log_probs = m_training_data->buffer_log_probs->readMap<float>();
@@ -622,11 +663,14 @@ void AIAgent::PushTrainingData(
         const int buffer_index = input_it->second;
         write_it->second += m_training_data->batch_size;
 
-        std::copy_n(buffer_states + buffer_index * state_size, state_size,
-                    states + index * state_size);
-        std::copy_n(buffer_masks + buffer_index * m_training_data->entity_num,
-                    m_training_data->entity_num,
-                    masks + index * m_training_data->entity_num);
+        std::copy_n(buffer_players + buffer_index * player_size, player_size,
+                    player_states + index * player_size);
+        std::copy_n(buffer_monsters + buffer_index * monster_size, monster_size,
+                    monster_states + index * monster_size);
+        std::copy_n(buffer_bullets + buffer_index * bullet_size, bullet_size,
+                    bullet_states + index * bullet_size);
+        std::copy_n(buffer_masks + buffer_index * entity_num, entity_num,
+                    masks + index * entity_num);
         std::copy_n(buffer_actions + buffer_index * m_training_data->action_dim,
                     m_training_data->action_dim,
                     actions + index * m_training_data->action_dim);
@@ -653,7 +697,9 @@ void AIAgent::Train(int step)
         UtilityFunctions::push_error(Utf8("AIAgent.Train：step必须为正整数。"));
         return;
     }
-    if (m_training_data->state == nullptr ||
+    if (m_training_data->player_state == nullptr ||
+        m_training_data->monster_state == nullptr ||
+        m_training_data->bullet_state == nullptr ||
         m_training_data->mask == nullptr ||
         m_training_data->actions == nullptr ||
         m_training_data->rewards == nullptr ||
@@ -710,21 +756,32 @@ void AIAgent::Train(int step)
 
         for (int frame = 0; frame < frame_count; ++frame) {
             const int offset = frame * batch_size;
-            auto states = Slice2D(
-                _Reshape(m_training_data->state,
-                         {sample_count, m_entityNum * m_entityFeatureDim}),
-                offset, 0, batch_size, m_entityNum * m_entityFeatureDim);
-            states = _Reshape(states,
-                              {batch_size, m_entityNum, m_entityFeatureDim});
+            auto players = Slice2D(
+                _Reshape(m_training_data->player_state, {sample_count, m_playerDim}),
+                offset, 0, batch_size, m_playerDim);
+            players = _Reshape(players, {batch_size, 1, m_playerDim});
+            auto monsters = Slice2D(
+                _Reshape(m_training_data->monster_state,
+                         {sample_count, m_monsterEntityNum * m_monsterDim}),
+                offset, 0, batch_size, m_monsterEntityNum * m_monsterDim);
+            monsters = _Reshape(monsters,
+                {batch_size, m_monsterEntityNum, m_monsterDim});
+            auto bullets = Slice2D(
+                _Reshape(m_training_data->bullet_state,
+                         {sample_count, m_bulletEntityNum * m_bulletDim}),
+                offset, 0, batch_size, m_bulletEntityNum * m_bulletDim);
+            bullets = _Reshape(bullets,
+                {batch_size, m_bulletEntityNum, m_bulletDim});
+            const int entity_num = 1 + m_monsterEntityNum + m_bulletEntityNum;
             auto masks = Slice2D(
-                m_training_data->mask, offset, 0, batch_size, m_entityNum);
+                m_training_data->mask, offset, 0, batch_size, entity_num);
             auto actions = Slice2D(
                 m_training_data->actions, offset, 0, batch_size,
                 m_training_data->action_dim);
             auto dones = Slice2D(
                 m_training_data->done, offset, 0, batch_size, 1);
 
-            const auto actor_outputs = m_mnnActorNet->onForward({states, masks});
+            const auto actor_outputs = m_mnnActorNet->onForward({players, monsters, bullets, masks});
             frame_log_probabilities.push_back(CalculateLogProbs(
                 actions, actor_outputs[0], actor_outputs[1]));
             frame_q_values.push_back(m_mnnCriticNet->onForward({actor_outputs[2]})[0]);
@@ -764,7 +821,8 @@ void godot::AIAgent::SetBatchInfo(int batch_size, int action_dim, int num_frames
     }
     if (mode == AIAgentMode::TRAINING && m_training_data != nullptr) {
         m_training_data->Init(
-            batch_size, num_frames, m_entityNum, m_entityFeatureDim, action_dim);
+            batch_size, num_frames, m_monsterEntityNum, m_bulletEntityNum,
+            m_playerDim, m_monsterDim, m_bulletDim, action_dim);
     } else if (mode == AIAgentMode::TRAINING) {
         UtilityFunctions::push_error(Utf8("AIAgent.SetBatchInfo：请先调用Init初始化训练网络。"));
         return;
