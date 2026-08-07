@@ -16,13 +16,13 @@ class ActorNet : public MNN::Express::Module {
 public:
     // 便捷构造沿用AIAgent的默认网络宽度，三个dim分别表示三类实体的特征数。
     ActorNet(int player_dim, int monster_dim, int bullet_dim,
-             int move_output_size, int shoot_output_size);
+             int monster_entity_num, int move_output_size);
 
     ActorNet(int player_dim,
              int monster_dim,
              int bullet_dim,
+             int monster_entity_num,
              int move_output_size,
-             int shoot_output_size,
              int embedding_dim,
              int attention_key_dim,
              int gru_hidden_dim,
@@ -49,8 +49,8 @@ protected:
     int m_player_dim = 0;
     int m_monster_dim = 0;
     int m_bullet_dim = 0;
+    int m_monster_entity_num = 0;
     int m_move_output_size = 0;
-    int m_shoot_output_size = 0;
     int m_embedding_dim = 0;
     int m_attention_key_dim = 0;
     int m_gru_hidden_dim = 0;
@@ -72,8 +72,6 @@ protected:
 
     MNN::Express::VARP m_shoot_fc;
     MNN::Express::VARP m_shoot_fc_bias;
-    MNN::Express::VARP m_shoot_fc_out;
-    MNN::Express::VARP m_shoot_fc_out_bias;
 
     MNN::Express::VARP m_gru_hidden;
     MNN::Express::VARP m_gru_hidden_cache;

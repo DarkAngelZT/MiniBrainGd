@@ -1,5 +1,7 @@
 #include "AIAgent.h"
 #include "EntityMask.h"
+#include "MovePolicy.h"
+#include "ShootPolicy.h"
 #include <MNN/expr/ExecutorScope.hpp>
 #include <MNN/expr/MathOp.hpp>
 #include <MNN/expr/NeuralNetWorkOp.hpp>
@@ -94,65 +96,34 @@ MNN::Express::VARP log_sigmoid(const MNN::Express::VARP &x) {
 MNN::Express::VARP godot::AIAgent::CalculateLogProbs(
     const MNN::Express::VARP &actions,
     const MNN::Express::VARP &move_data,
-    const MNN::Express::VARP &shoot_data)
+    const MNN::Express::VARP &shoot_data,
+    const MNN::Express::VARP &monster_mask)
 {
-    using namespace MNN::Express;
-    if (actions == nullptr || move_data == nullptr || shoot_data == nullptr) {
-        UtilityFunctions::push_error(Utf8("CalculateLogProbs：输入不能为空。"));
+    if (actions == nullptr || move_data == nullptr || shoot_data == nullptr ||
+        monster_mask == nullptr) {
+        UtilityFunctions::push_error(Utf8("CalculateLogProbs????????"));
         return nullptr;
     }
     const auto *action_info = actions->getInfo();
     const auto *move_info = move_data->getInfo();
     const auto *shoot_info = shoot_data->getInfo();
+    const auto *mask_info = monster_mask->getInfo();
     if (action_info == nullptr || move_info == nullptr || shoot_info == nullptr ||
-        action_info->dim.size() != 2 || move_info->dim.size() != 2 ||
-        shoot_info->dim.size() != 2 || action_info->dim[0] != move_info->dim[0] ||
-        action_info->dim[0] != shoot_info->dim[0] || action_info->dim[1] < 4 ||
-        move_info->dim[1] < 6 || shoot_info->dim[1] < 3) {
-        UtilityFunctions::push_error(Utf8("CalculateLogProbs：输入形状不匹配。"));
+        mask_info == nullptr || action_info->dim.size() != 2 ||
+        move_info->dim.size() != 2 || shoot_info->dim.size() != 2 ||
+        mask_info->dim.size() != 2 || action_info->dim[0] != move_info->dim[0] ||
+        action_info->dim[0] != shoot_info->dim[0] ||
+        action_info->dim[0] != mask_info->dim[0] || action_info->dim[1] != 4 ||
+        move_info->dim[1] != 4 || mask_info->dim[1] != m_monsterEntityNum ||
+        shoot_info->dim[1] != m_monsterEntityNum + 1) {
+        UtilityFunctions::push_error(Utf8("CalculateLogProbs?????????"));
         return nullptr;
     }
-    const int batch_size = action_info->dim[0];
-
-    auto categorical_log_probability = [&](int move_offset, int action_column) {
-        const auto logits = Slice2D(move_data, 0, move_offset, batch_size, 3);
-        const auto maximum = _ReduceMax(logits, {1}, true);
-        const auto log_normalizer = maximum + _Log(
-            _ReduceSum(_Exp(logits - maximum), {1}, true));
-        const auto action = _Reshape(
-            _Cast(Slice2D(actions, 0, action_column, batch_size, 1),
-                  halide_type_of<int>()),
-            {batch_size});
-        const auto one_hot = _OneHot(
-            action, _Scalar<int>(3), _Scalar<float>(1.0f),
-            _Scalar<float>(0.0f));
-        return _ReduceSum((logits - log_normalizer) * one_hot, {1}, true);
-    };
-
-    const auto horizontal_log_probability = categorical_log_probability(0, 0);
-    const auto vertical_log_probability = categorical_log_probability(3, 1);
-
-    const auto mean_x = Slice2D(shoot_data, 0, 0, batch_size, 1);
-    const auto mean_y = Slice2D(shoot_data, 0, 1, batch_size, 1);
-    const auto variance = Slice2D(shoot_data, 0, 2, batch_size, 1);
-    const auto standard_deviation = _Sqrt(_Abs(variance) + _Scalar<float>(1.0e-6f));
-    const auto mean_angle = _Atan2(mean_y, mean_x);
-    const auto action_x = Slice2D(actions, 0, 2, batch_size, 1);
-    const auto action_y = Slice2D(actions, 0, 3, batch_size, 1);
-    const auto action_angle = _Atan2(action_y, action_x);
-    const auto raw_delta = action_angle - mean_angle;
-    const auto wrapped_delta = _Atan2(_Sin(raw_delta), _Cos(raw_delta));
-    const auto normalized_delta = wrapped_delta / standard_deviation;
-    const auto angle_log_probability =
-        _Scalar<float>(-0.5f) * _Square(normalized_delta)
-        - _Log(standard_deviation)
-        - _Scalar<float>(0.9189385332046727f);
-
-    const auto shoot_logit = Slice2D(shoot_data, 0, 3, batch_size, 1);
-    const auto log_shoot = log_sigmoid(shoot_logit);
-
-    return horizontal_log_probability + vertical_log_probability
-        + angle_log_probability + log_shoot;
+    const auto move_log_probability =
+        MiniMind::MovePolicy::GaussianLogProbability(actions, move_data);
+    const auto shoot_log_probability = MiniMind::ShootPolicy::LogProbability(
+        actions, shoot_data, monster_mask);
+    return move_log_probability + shoot_log_probability;
 }
 
 MNN::Express::VARP godot::AIAgent::ComputeAdvantage(
@@ -251,11 +222,11 @@ void AIAgent::Init(
     m_playerDim = m_monsterDim = m_bulletDim = 0;
 
     if (monster_entity_num <= 0 || bullet_entity_num <= 0 ||
-        player_dim <= 0 || monster_dim <= 0 || bullet_dim <= 0 || move_dim < 6 ||
-        shoot_dim < 4 || embedding_dim <= 0 || attention_key_dim <= 0 ||
+        player_dim <= 0 || monster_dim <= 0 || bullet_dim <= 0 || move_dim != 4 ||
+        shoot_dim != monster_entity_num + 1 || embedding_dim <= 0 || attention_key_dim <= 0 ||
         gru_hidden_dim <= 0 || out_hidden_dim <= 0) {
         UtilityFunctions::push_error(
-            Utf8("AIAgent.Init：维度必须为正数，move_dim至少为6，shoot_dim至少为4。"));
+            Utf8("AIAgent.Init：move_dim必须为4，shoot_dim至少为4，其他维度必须为正数。"));
         return;
     }
 
@@ -269,7 +240,7 @@ void AIAgent::Init(
     m_bulletDim = bullet_dim;
 
     m_mnnActorNet = new MiniMind::ActorNet(
-        player_dim, monster_dim, bullet_dim, move_dim, shoot_dim, embedding_dim,
+        player_dim, monster_dim, bullet_dim, monster_entity_num, move_dim, embedding_dim,
         attention_key_dim, gru_hidden_dim, out_hidden_dim);
 
     if (mode == AIAgentMode::TRAINING) {
@@ -346,30 +317,21 @@ PackedFloat32Array AIAgent::ProcessSensorData(
         return output;
     }
 
-    int horizon = 0;
-    int vertical = 0;
-    if (result[0]->getInfo()->dim[1] >= 3) {
-        horizon = static_cast<int>(std::max_element(move, move + 3) - move);
-    }
-    if (result[0]->getInfo()->dim[1] >= 6) {
-        vertical = static_cast<int>(std::max_element(move + 3, move + 6) - (move + 3));
-    }
+    // 单条推理使用均值确定性输出，不引入采样噪声。
+    const float horizon = MiniMind::MovePolicy::DeterministicMean(move[0]);
+    const float vertical = MiniMind::MovePolicy::DeterministicMean(move[2]);
 
-    float angle_x = shoot[0];
-    float angle_y = shoot[1];
-    const float length = std::sqrt(angle_x * angle_x + angle_y * angle_y);
-    if (length > 0.0f) {
-        angle_x /= length;
-        angle_y /= length;
-    }
-    const float shoot_probability = 1.0f / (1.0f + std::exp(-shoot[3]));
+    const float *monster_mask = mask->readMap<float>() + 1;
+    const int target_index = MiniMind::ShootPolicy::MaskedArgmax(
+        shoot, monster_mask, m_monsterEntityNum);
+    const float shoot_probability =
+        1.0f / (1.0f + std::exp(-shoot[m_monsterEntityNum]));
 
-    output.resize(5);
-    output[0] = static_cast<float>(horizon);
-    output[1] = static_cast<float>(vertical);
-    output[2] = angle_x;
-    output[3] = angle_y;
-    output[4] = shoot_probability > 0.5f ? 1.0f : 0.0f;
+    output.resize(4);
+    output[0] = horizon;
+    output[1] = vertical;
+    output[2] = static_cast<float>(target_index);
+    output[3] = shoot_probability > 0.5f ? 1.0f : 0.0f;
 
     if (isGameEnd) {
         m_mnnActorNet->ResetAllGRUMemory();
@@ -511,50 +473,41 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
     for (int batch = 0; batch < batch_size; ++batch) {
         const float *move_row = move + batch * move_dim;
         const float *shoot_row = shoot + batch * shoot_dim;
-        std::discrete_distribution<int> horizontal_distribution({
-            std::exp(move_row[0]), std::exp(move_row[1]), std::exp(move_row[2])});
-        std::discrete_distribution<int> vertical_distribution({
-            std::exp(move_row[3]), std::exp(move_row[4]), std::exp(move_row[5])});
-        const float horizontal = static_cast<float>(horizontal_distribution(generator));
-        const float vertical = static_cast<float>(vertical_distribution(generator));
-
-        const float standard_deviation = std::sqrt(std::abs(shoot_row[2]) + 1.0e-6f);
+        const float *monster_mask_row = mask_data + batch * entity_num + 1;
         std::normal_distribution<float> normal(0.0f, 1.0f);
-        float angle_x = shoot_row[0] + standard_deviation * normal(generator);
-        float angle_y = shoot_row[1] + standard_deviation * normal(generator);
-        const float length = std::sqrt(angle_x * angle_x + angle_y * angle_y);
+        const float horizontal = MiniMind::MovePolicy::Sample(
+            move_row[0], move_row[1], normal(generator));
+        const float vertical = MiniMind::MovePolicy::Sample(
+            move_row[2], move_row[3], normal(generator));
 
-        const float shoot_probability = 1.0f / (1.0f + std::exp(-shoot_row[3]));
-        float sampled_action[5] = {
-            horizontal, vertical, angle_x, angle_y, shoot_probability};
-        std::copy_n(sampled_action, m_training_data->action_dim,
-                    buffer_action + batch * m_training_data->action_dim);
-        const auto sampled_action_tensor = _Const(
-            sampled_action, {1, 5}, NCHW);
-        const auto sampled_move_tensor = _Const(
-            move_row, {1, move_dim}, NCHW);
-        const auto sampled_shoot_tensor = _Const(
-            shoot_row, {1, shoot_dim}, NCHW);
-        buffer_log_probability[batch] = CalculateLogProbs(
-            sampled_action_tensor, sampled_move_tensor,
-            sampled_shoot_tensor)->readMap<float>()[0];
-
-        if (length > 1.0e-6f) {
-            angle_x /= length;
-            angle_y /= length;
-        } else {
-            angle_x = 1.0f;
-            angle_y = 0.0f;
-        }
-        
+        std::uniform_real_distribution<float> uniform(0.0f, 1.0f);
+        const int target_index = MiniMind::ShootPolicy::SampleCategorical(
+            shoot_row, monster_mask_row, m_monsterEntityNum, uniform(generator));
+        const float shoot_probability =
+            1.0f / (1.0f + std::exp(-shoot_row[m_monsterEntityNum]));
         std::bernoulli_distribution shoot_bernoulli(shoot_probability);
+        const float shoot_action = shoot_bernoulli(generator) ? 1.0f : 0.0f;
+
+        // 缓存原始高斯移动值、怪物索引和连续开火概率，保持旧策略概率口径。
+        float sampled_action[4] = {
+            horizontal, vertical, static_cast<float>(target_index), shoot_probability};
+        std::copy_n(sampled_action, 4,
+                    buffer_action + batch * m_training_data->action_dim);
+        const auto sampled_action_tensor = _Const(sampled_action, {1, 4}, NCHW);
+        const auto sampled_move_tensor = _Const(move_row, {1, move_dim}, NCHW);
+        const auto sampled_shoot_tensor = _Const(shoot_row, {1, shoot_dim}, NCHW);
+        const auto sampled_monster_mask = _Const(
+            monster_mask_row, {1, m_monsterEntityNum}, NCHW);
+        buffer_log_probability[batch] = CalculateLogProbs(
+            sampled_action_tensor, sampled_move_tensor, sampled_shoot_tensor,
+            sampled_monster_mask)->readMap<float>()[0];
+
         PackedFloat32Array action;
-        action.resize(5);
-        action[0] = horizontal;
-        action[1] = vertical;
-        action[2] = angle_x;
-        action[3] = angle_y;
-        action[4] = shoot_bernoulli(generator) ? 1.0f : 0.0f;
+        action.resize(4);
+        action[0] = MiniMind::MovePolicy::DiscretizeRawAction(horizontal);
+        action[1] = MiniMind::MovePolicy::DiscretizeRawAction(vertical);
+        action[2] = static_cast<float>(target_index);
+        action[3] = shoot_action;
         result_array[batch] = action;
     }
     if (m_training_data->rollout_memory == nullptr)
@@ -782,8 +735,10 @@ void AIAgent::Train(int step)
                 m_training_data->done, offset, 0, batch_size, 1);
 
             const auto actor_outputs = m_mnnActorNet->onForward({players, monsters, bullets, masks});
+            auto monster_masks = Slice2D(
+                masks, 0, 1, batch_size, m_monsterEntityNum);
             frame_log_probabilities.push_back(CalculateLogProbs(
-                actions, actor_outputs[0], actor_outputs[1]));
+                actions, actor_outputs[0], actor_outputs[1], monster_masks));
             frame_q_values.push_back(m_mnnCriticNet->onForward({actor_outputs[2]})[0]);
 
             const float *done_values = dones->readMap<float>();
@@ -814,9 +769,9 @@ void AIAgent::Train(int step)
 
 void godot::AIAgent::SetBatchInfo(int batch_size, int action_dim, int num_frames)
 {
-    if (batch_size <= 0 || num_frames <= 0 || action_dim != 5) {
+    if (batch_size <= 0 || num_frames <= 0 || action_dim != 4) {
         UtilityFunctions::push_error(
-            Utf8("AIAgent.SetBatchInfo：batch_size和num_frames必须为正数，action_dim必须为5。"));
+            Utf8("AIAgent.SetBatchInfo：batch_size和num_frames必须为正数，action_dim必须为4。"));
         return;
     }
     if (mode == AIAgentMode::TRAINING && m_training_data != nullptr) {

@@ -1,5 +1,6 @@
 #include "ActorNet.h"
 
+#include "MovePolicy.h"
 #include "attention.hpp"
 #include "embedding.hpp"
 #include "gru.hpp"
@@ -61,13 +62,13 @@ std::shared_ptr<ModuleType> clone_child(
 ActorNet::ActorNet(int player_dim,
                    int monster_dim,
                    int bullet_dim,
-                   int move_output_size,
-                   int shoot_output_size)
+                   int monster_entity_num,
+                   int move_output_size)
     : ActorNet(player_dim,
                monster_dim,
                bullet_dim,
+               monster_entity_num,
                move_output_size,
-               shoot_output_size,
                16,
                16,
                128,
@@ -77,8 +78,8 @@ ActorNet::ActorNet(int player_dim,
 ActorNet::ActorNet(int player_dim,
                    int monster_dim,
                    int bullet_dim,
+                   int monster_entity_num,
                    int move_output_size,
-                   int shoot_output_size,
                    int embedding_dim,
                    int attention_key_dim,
                    int gru_hidden_dim,
@@ -86,18 +87,17 @@ ActorNet::ActorNet(int player_dim,
     : m_player_dim(player_dim),
       m_monster_dim(monster_dim),
       m_bullet_dim(bullet_dim),
+      m_monster_entity_num(monster_entity_num),
       m_move_output_size(move_output_size),
-      m_shoot_output_size(shoot_output_size),
       m_embedding_dim(embedding_dim),
       m_attention_key_dim(attention_key_dim),
       m_gru_hidden_dim(gru_hidden_dim),
       m_out_hidden_dim(out_hidden_dim) {
     if (player_dim <= 0 || monster_dim <= 0 || bullet_dim <= 0 ||
-        move_output_size <= 0 ||
-        shoot_output_size <= 0 || embedding_dim <= 0 ||
+        monster_entity_num <= 0 || move_output_size != 4 || embedding_dim <= 0 ||
         attention_key_dim <= 0 || gru_hidden_dim <= 0 ||
         out_hidden_dim <= 0) {
-        MNN_ERROR("ActorNet：所有网络维度必须为正整数。\n");
+        MNN_ERROR("ActorNet：移动输出维度必须为4，其他网络维度必须为正整数。\n");
         return;
     }
 
@@ -110,11 +110,10 @@ ActorNet::ActorNet(int player_dim,
         make_parameter({m_move_output_size, m_out_hidden_dim/2});
     m_move_fc_out_bias = make_parameter({m_move_output_size});
 
-    m_shoot_fc = make_parameter({m_out_hidden_dim, m_gru_hidden_dim});
-    m_shoot_fc_bias = make_parameter({m_out_hidden_dim});
-    m_shoot_fc_out =
-        make_parameter({m_shoot_output_size, m_out_hidden_dim});
-    m_shoot_fc_out_bias = make_parameter({m_shoot_output_size});
+    // 唯一的射击输出层复用主注意力表示，一次生成全部分数和开火logit。
+    m_shoot_fc = make_parameter(
+        {m_monster_entity_num + 1, 21 * m_embedding_dim});
+    m_shoot_fc_bias = make_parameter({m_monster_entity_num + 1});
 
     addParameter(m_move_fc);
     addParameter(m_move_fc_bias);
@@ -124,8 +123,6 @@ ActorNet::ActorNet(int player_dim,
     addParameter(m_move_fc_out_bias);
     addParameter(m_shoot_fc);
     addParameter(m_shoot_fc_bias);
-    addParameter(m_shoot_fc_out);
-    addParameter(m_shoot_fc_out_bias);
 
     m_player_embedding =
         std::make_shared<Embedding>(m_player_dim, m_embedding_dim);
@@ -174,6 +171,7 @@ std::vector<MNN::Express::VARP> ActorNet::onForward(
     };
     if (!valid_data(player_info, m_player_dim) || player_info->dim[1] != 1 ||
         !valid_data(monster_info, m_monster_dim) ||
+        monster_info->dim[1] != m_monster_entity_num ||
         !valid_data(bullet_info, m_bullet_dim) ||
         monster_info->dim[0] != player_info->dim[0] ||
         bullet_info->dim[0] != player_info->dim[0]) {
@@ -220,16 +218,44 @@ std::vector<MNN::Express::VARP> ActorNet::onForward(
     const auto move_hidden2 = _Relu(
         _Add(_MatMul(move_hidden1, m_move_fc2, false, true),
              m_move_fc2_bias));
-    const auto move_output =
+    const auto raw_move_output =
         _Add(_MatMul(move_hidden2, m_move_fc_out, false, true),
              m_move_fc_out_bias);
+    const auto horizontal_mean = MovePolicy::SliceColumn(
+        raw_move_output, batch_size, 0);
+    const auto horizontal_sigma = MovePolicy::PositiveSigma(
+        MovePolicy::SliceColumn(raw_move_output, batch_size, 1));
+    const auto vertical_mean = MovePolicy::SliceColumn(
+        raw_move_output, batch_size, 2);
+    const auto vertical_sigma = MovePolicy::PositiveSigma(
+        MovePolicy::SliceColumn(raw_move_output, batch_size, 3));
+    // 对外移动参数布局固定为：[水平均值、水平标准差、垂直均值、垂直标准差]。
+    const auto move_output = _Concat(
+        {horizontal_mean, horizontal_sigma, vertical_mean, vertical_sigma}, 1);
 
-    const auto shoot_hidden = _Relu(
-        _Add(_MatMul(hidden_next, m_shoot_fc, false, true),
-             m_shoot_fc_bias));
-    const auto shoot_output =
-        _Add(_MatMul(shoot_hidden, m_shoot_fc_out, false, true),
-             m_shoot_fc_out_bias);
+    // 完整掩码布局为[player, monsters..., bullets...]，这里切出怪物段。
+    const int monster_mask_starts[] = {0, 1};
+    const int monster_mask_sizes[] = {batch_size, m_monster_entity_num};
+    const auto monster_mask = _Slice(
+        inputs[3], _Const(monster_mask_starts, {2}, NCHW, halide_type_of<int>()),
+        _Const(monster_mask_sizes, {2}, NCHW, halide_type_of<int>()));
+    const auto raw_shoot_output = _Add(
+        _MatMul(flattened, m_shoot_fc, false, true), m_shoot_fc_bias);
+    const int score_starts[] = {0, 0};
+    const int score_sizes[] = {batch_size, m_monster_entity_num};
+    auto shoot_scores = _Slice(
+        raw_shoot_output, _Const(score_starts, {2}, NCHW, halide_type_of<int>()),
+        _Const(score_sizes, {2}, NCHW, halide_type_of<int>()));
+    // padding分数固定为极小有限值，避免它被目标选择逻辑选中。
+    shoot_scores = shoot_scores +
+        (_Scalar<float>(1.0f) - monster_mask) * _Scalar<float>(-1.0e9f);
+    const int possibility_starts[] = {0, m_monster_entity_num};
+    const int possibility_sizes[] = {batch_size, 1};
+    const auto shoot_possibility = _Slice(
+        raw_shoot_output,
+        _Const(possibility_starts, {2}, NCHW, halide_type_of<int>()),
+        _Const(possibility_sizes, {2}, NCHW, halide_type_of<int>()));
+    const auto shoot_output = _Concat({shoot_scores, shoot_possibility}, 1);
 
     // 保存数值常量而不是计算表达式，使跨时间步行为与旧网络的截断记忆一致。
     const float* hidden_values = hidden_next->readMap<float>();
@@ -289,8 +315,8 @@ MNN::Express::Module* ActorNet::clone(CloneContext* context) const {
     module->m_player_dim = m_player_dim;
     module->m_monster_dim = m_monster_dim;
     module->m_bullet_dim = m_bullet_dim;
+    module->m_monster_entity_num = m_monster_entity_num;
     module->m_move_output_size = m_move_output_size;
-    module->m_shoot_output_size = m_shoot_output_size;
     module->m_embedding_dim = m_embedding_dim;
     module->m_attention_key_dim = m_attention_key_dim;
     module->m_gru_hidden_dim = m_gru_hidden_dim;
@@ -304,8 +330,6 @@ MNN::Express::Module* ActorNet::clone(CloneContext* context) const {
     module->m_move_fc_out_bias = m_move_fc_out_bias;
     module->m_shoot_fc = m_shoot_fc;
     module->m_shoot_fc_bias = m_shoot_fc_bias;
-    module->m_shoot_fc_out = m_shoot_fc_out;
-    module->m_shoot_fc_out_bias = m_shoot_fc_out_bias;
 
     module->addParameter(module->m_move_fc);
     module->addParameter(module->m_move_fc_bias);
@@ -315,8 +339,6 @@ MNN::Express::Module* ActorNet::clone(CloneContext* context) const {
     module->addParameter(module->m_move_fc_out_bias);
     module->addParameter(module->m_shoot_fc);
     module->addParameter(module->m_shoot_fc_bias);
-    module->addParameter(module->m_shoot_fc_out);
-    module->addParameter(module->m_shoot_fc_out_bias);
 
     module->m_player_embedding = clone_child(m_player_embedding, context);
     module->m_monster_embedding = clone_child(m_monster_embedding, context);

@@ -156,7 +156,8 @@ protected:
     MNN::Express::VARP CalculateLogProbs(
         const MNN::Express::VARP &actions,
         const MNN::Express::VARP &move_data,
-        const MNN::Express::VARP &shoot_data);
+        const MNN::Express::VARP &shoot_data,
+        const MNN::Express::VARP &monster_mask);
 
     MNN::Express::VARP ComputeAdvantage(
         const MNN::Express::VARP &td_delta,
