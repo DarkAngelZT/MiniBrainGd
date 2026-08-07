@@ -1,6 +1,5 @@
 #include "AIAgent.h"
 #include "EntityMask.h"
-#include "MovePolicy.h"
 #include <MNN/expr/ExecutorScope.hpp>
 #include <MNN/expr/MathOp.hpp>
 #include <MNN/expr/NeuralNetWorkOp.hpp>
@@ -115,8 +114,23 @@ MNN::Express::VARP godot::AIAgent::CalculateLogProbs(
     }
     const int batch_size = action_info->dim[0];
 
-    const auto move_log_probability =
-        MiniMind::MovePolicy::JointLogProbability(actions, move_data);
+    auto categorical_log_probability = [&](int move_offset, int action_column) {
+        const auto logits = Slice2D(move_data, 0, move_offset, batch_size, 3);
+        const auto maximum = _ReduceMax(logits, {1}, true);
+        const auto log_normalizer = maximum + _Log(
+            _ReduceSum(_Exp(logits - maximum), {1}, true));
+        const auto action = _Reshape(
+            _Cast(Slice2D(actions, 0, action_column, batch_size, 1),
+                  halide_type_of<int>()),
+            {batch_size});
+        const auto one_hot = _OneHot(
+            action, _Scalar<int>(3), _Scalar<float>(1.0f),
+            _Scalar<float>(0.0f));
+        return _ReduceSum((logits - log_normalizer) * one_hot, {1}, true);
+    };
+
+    const auto horizontal_log_probability = categorical_log_probability(0, 0);
+    const auto vertical_log_probability = categorical_log_probability(3, 1);
 
     const auto mean_x = Slice2D(shoot_data, 0, 0, batch_size, 1);
     const auto mean_y = Slice2D(shoot_data, 0, 1, batch_size, 1);
@@ -137,7 +151,8 @@ MNN::Express::VARP godot::AIAgent::CalculateLogProbs(
     const auto shoot_logit = Slice2D(shoot_data, 0, 3, batch_size, 1);
     const auto log_shoot = log_sigmoid(shoot_logit);
 
-    return move_log_probability + angle_log_probability + log_shoot;
+    return horizontal_log_probability + vertical_log_probability
+        + angle_log_probability + log_shoot;
 }
 
 MNN::Express::VARP godot::AIAgent::ComputeAdvantage(
@@ -496,14 +511,10 @@ godot::Array godot::AIAgent::BatchProcessSensorData(
     for (int batch = 0; batch < batch_size; ++batch) {
         const float *move_row = move + batch * move_dim;
         const float *shoot_row = shoot + batch * shoot_dim;
-        const auto horizontal_weights =
-            MiniMind::MovePolicy::StableWeights(move_row, 0);
-        const auto vertical_weights =
-            MiniMind::MovePolicy::StableWeights(move_row, 3);
-        std::discrete_distribution<int> horizontal_distribution(
-            horizontal_weights.begin(), horizontal_weights.end());
-        std::discrete_distribution<int> vertical_distribution(
-            vertical_weights.begin(), vertical_weights.end());
+        std::discrete_distribution<int> horizontal_distribution({
+            std::exp(move_row[0]), std::exp(move_row[1]), std::exp(move_row[2])});
+        std::discrete_distribution<int> vertical_distribution({
+            std::exp(move_row[3]), std::exp(move_row[4]), std::exp(move_row[5])});
         const float horizontal = static_cast<float>(horizontal_distribution(generator));
         const float vertical = static_cast<float>(vertical_distribution(generator));
 
