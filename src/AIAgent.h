@@ -13,6 +13,7 @@
 
 #include "ActorNet.h"
 #include "CriticNet.h"
+#include "MovePolicy.h"
 
 namespace MNN::Train { class ParameterOptimizer; }
 
@@ -152,12 +153,14 @@ protected:
     float m_lambda = 0.9f;
     float m_clip_epsilon = 0.2f;
     float m_continuous_gamma = 0.9f;
+    float m_move_logistic_scale = MiniMind::MovePolicy::kInitialLogisticScale;
 
     MNN::Express::VARP CalculateLogProbs(
         const MNN::Express::VARP &actions,
         const MNN::Express::VARP &move_data,
         const MNN::Express::VARP &shoot_data,
-        const MNN::Express::VARP &monster_mask);
+        const MNN::Express::VARP &monster_mask,
+        float move_logistic_scale);
 
     MNN::Express::VARP ComputeAdvantage(
         const MNN::Express::VARP &td_delta,

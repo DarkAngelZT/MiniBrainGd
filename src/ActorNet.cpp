@@ -1,6 +1,5 @@
 #include "ActorNet.h"
 
-#include "MovePolicy.h"
 #include "attention.hpp"
 #include "embedding.hpp"
 #include "gru.hpp"
@@ -94,10 +93,10 @@ ActorNet::ActorNet(int player_dim,
       m_gru_hidden_dim(gru_hidden_dim),
       m_out_hidden_dim(out_hidden_dim) {
     if (player_dim <= 0 || monster_dim <= 0 || bullet_dim <= 0 ||
-        monster_entity_num <= 0 || move_output_size != 4 || embedding_dim <= 0 ||
+        monster_entity_num <= 0 || move_output_size != 2 || embedding_dim <= 0 ||
         attention_key_dim <= 0 || gru_hidden_dim <= 0 ||
         out_hidden_dim <= 0) {
-        MNN_ERROR("ActorNet：移动输出维度必须为4，其他网络维度必须为正整数。\n");
+        MNN_ERROR("ActorNet：移动输出维度必须为2，其他网络维度必须为正整数。\n");
         return;
     }
 
@@ -221,17 +220,8 @@ std::vector<MNN::Express::VARP> ActorNet::onForward(
     const auto raw_move_output =
         _Add(_MatMul(move_hidden2, m_move_fc_out, false, true),
              m_move_fc_out_bias);
-    const auto horizontal_mean = MovePolicy::SliceColumn(
-        raw_move_output, batch_size, 0);
-    const auto horizontal_sigma = MovePolicy::PositiveSigma(
-        MovePolicy::SliceColumn(raw_move_output, batch_size, 1));
-    const auto vertical_mean = MovePolicy::SliceColumn(
-        raw_move_output, batch_size, 2);
-    const auto vertical_sigma = MovePolicy::PositiveSigma(
-        MovePolicy::SliceColumn(raw_move_output, batch_size, 3));
-    // 对外移动参数布局固定为：[水平均值、水平标准差、垂直均值、垂直标准差]。
-    const auto move_output = _Concat(
-        {horizontal_mean, horizontal_sigma, vertical_mean, vertical_sigma}, 1);
+    // 移动头只输出水平和垂直两个原始均值，采样与离散化由 AIAgent 完成。
+    const auto move_output = raw_move_output;
 
     // 完整掩码布局为[player, monsters..., bullets...]，这里切出怪物段。
     const int monster_mask_starts[] = {0, 1};

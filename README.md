@@ -46,7 +46,7 @@ agent.set_mode(AIAgent.INFERENCE)
 # 初始化网络
 agent.Init(
     input_dim=64,           # 输入维度
-    move_dim=4,             # 移动高斯参数维度
+    move_dim=2,             # 水平和垂直移动均值
     shoot_dim=3,            # 射击动作维度
     entity_feature_dim=4    # 实体特征维度
 )
@@ -83,7 +83,7 @@ var actions = agent.ProcessSensorData(player_data, monster_data, bullet_data)
 # 创建推理代理
 var agent = AIAgent.new()
 agent.set_mode(AIAgent.INFERENCE)
-agent.Init(monster_entity_num=10, bullet_entity_num=10, player_dim=4, monster_dim=4, bullet_dim=4, move_dim=4, shoot_dim=11)
+agent.Init(monster_entity_num=10, bullet_entity_num=10, player_dim=4, monster_dim=4, bullet_dim=4, move_dim=2, shoot_dim=11)
 
 # 每帧推理
 func _process(delta):
@@ -159,7 +159,7 @@ BatchProcessSensorData → [执行一帧环境交互] → PushTrainingData → [
 # 创建训练代理
 var agent = AIAgent.new()
 agent.set_mode(AIAgent.TRAINING)
-agent.Init(monster_entity_num=10, bullet_entity_num=10, player_dim=4, monster_dim=4, bullet_dim=4, move_dim=4, shoot_dim=11,
+agent.Init(monster_entity_num=10, bullet_entity_num=10, player_dim=4, monster_dim=4, bullet_dim=4, move_dim=2, shoot_dim=11,
            embedding_dim=32, attention_key_dim=16, gru_hidden_dim=64, out_hidden_dim=128)
 
 # 设置训练参数
@@ -237,7 +237,7 @@ agent.Load("C:/path/to/your/project/ai", "checkpoint")
 
 **`Init(monster_entity_num, bullet_entity_num, player_dim, monster_dim, bullet_dim, move_dim, shoot_dim, embedding_dim=16, attention_key_dim=16, gru_hidden_dim=128, out_hidden_dim=128)`**
 
-`move_dim` 固定为 4，Actor 移动头布局为 `[horizontal_mu, horizontal_sigma, vertical_mu, vertical_sigma]`，其中两个 `sigma` 均为有限正数。
+`move_dim` 固定为 2，Actor 移动头布局为 `[horizontal_mu, vertical_mu]`。训练时使用 Logistic 噪声采样并按 sigmoid 的三个等分区间输出 `-1/0/1`，推理时直接对均值做相同映射。
 
 初始化神经网络架构。
 
